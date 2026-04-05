@@ -444,7 +444,6 @@ function Fleet({ data, db, profile }) {
   const [editId, setEditId] = useState(null);
   const isAdmin = profile?.role === "admin";
   const t = useT();
-  const t = useT();
 
   const handleSave = async () => {
     if (!form.name) return;
@@ -526,7 +525,7 @@ function Contracts({ data, db, profile }) {
   return (
     <div>
       <div style={S.sectionHeader}><h3 style={{ margin: 0, color: "#e0e0e8" }}>{t.clientContracts}</h3>
-        <button style={S.primaryBtn} onClick={() => { setEditId(null); setForm(emptyForm); setShowForm(true); }>>{t.newContract}</button></div>
+        <button style={S.primaryBtn} onClick={() => { setEditId(null); setForm(emptyForm); setShowForm(true); }>{t.newContract}</button></div>
       <input style={{ ...S.input, marginBottom: 16, marginTop: 12 }} placeholder="Search by client name, phone or ID..." value={search} onChange={(e) => setSearch(e.target.value)} />
       {showForm && (
         <Modal title={editId ? "Edit Contract" : "New Contract"} onClose={() => setShowForm(false)} wide>
@@ -593,7 +592,7 @@ function Expenses({ data, db, profile, timeRange, setTimeRange }) {
 
   return (
     <div>
-      <div style={S.sectionHeader}><h3 style={{ margin: 0, color: "#e0e0e8" }}>{t.expensesTracker}</h3><button style={S.primaryBtn} onClick={() => { setForm(emptyForm); setShowForm(true); }>>{t.addExpense}</button></div>
+      <div style={S.sectionHeader}><h3 style={{ margin: 0, color: "#e0e0e8" }}>{t.expensesTracker}</h3><button style={S.primaryBtn} onClick={() => { setForm(emptyForm); setShowForm(true); }>{t.addExpense}</button></div>
       <TimeFilter value={timeRange} onChange={setTimeRange} />
       <div style={S.statGrid}>
         <StatCard label="Total Expenses" value={currency(total)} accent="#dc2626" />
@@ -644,7 +643,7 @@ function RevenueTab({ data, db, profile, timeRange, setTimeRange }) {
 
   return (
     <div>
-      <div style={S.sectionHeader}><h3 style={{ margin: 0, color: "#e0e0e8" }}>{t.revenueTracker}</h3><button style={S.primaryBtn} onClick={() => { setForm(emptyForm); setShowForm(true); }>>{t.addRevenue}</button></div>
+      <div style={S.sectionHeader}><h3 style={{ margin: 0, color: "#e0e0e8" }}>{t.revenueTracker}</h3><button style={S.primaryBtn} onClick={() => { setForm(emptyForm); setShowForm(true); }>{t.addRevenue}</button></div>
       <TimeFilter value={timeRange} onChange={setTimeRange} />
       <div style={S.statGrid}>
         <StatCard label="Total Revenue" value={currency(total)} accent="#16a34a" />
