@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 import { supabase } from "./supabaseClient";
+import translations from "./translations";
 
 const DEFAULT_CATEGORIES = ["Scooter 50cc", "Scooter 125cc", "Scooter 150cc", "Bike", "E-Bike"];
 const SEASONS = [
@@ -7,19 +8,27 @@ const SEASONS = [
   { id: "mid", label: "Mid Season", color: "#f59e0b" },
   { id: "high", label: "High Season", color: "#ef4444" },
 ];
-const TABS = [
-  { id: "dashboard", label: "Dashboard", icon: "📊" },
-  { id: "fleet", label: "Fleet", icon: "🛵" },
-  { id: "contracts", label: "Contracts", icon: "📝" },
-  { id: "expenses", label: "Expenses", icon: "💸" },
-  { id: "revenue", label: "Revenue", icon: "💰" },
-  { id: "cash", label: "Cash & Bank", icon: "🏦" },
+const TABS_DEF = [
+  { id: "dashboard", key: "dashboard", icon: "📊" },
+  { id: "fleet", key: "fleet", icon: "🛵" },
+  { id: "contracts", key: "contracts", icon: "📝" },
+  { id: "expenses", key: "expenses", icon: "💸" },
+  { id: "revenue", key: "revenue", icon: "💰" },
+  { id: "cash", key: "cashBank", icon: "🏦" },
 ];
 
 const today = () => new Date().toISOString().split("T")[0];
 const currency = (n) => `${Number(n || 0).toLocaleString("fr-MA")} MAD`;
 
 const AuthContext = createContext(null);
+const LangContext = createContext("en");
+function useT() {
+  const lang = useContext(LangContext);
+  const t = translations[lang] || translations.en;
+  return t;
+}
+function useLang() { return useContext(LangContext); }
+const LANGS = [{ id: "en", label: "EN", flag: "🇬🇧" }, { id: "fr", label: "FR", flag: "🇫🇷" }, { id: "ar", label: "عر", flag: "🇲🇦" }];
 
 /* ═══════ DATA HOOK — SUPABASE ═══════ */
 function useSupabaseData(user) {
@@ -251,29 +260,30 @@ function StatCard({ label, value, sub, accent }) {
 }
 
 function TimeFilter({ value, onChange }) {
+  const t = useT();
   const [showCustom, setShowCustom] = useState(false);
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const isCustom = typeof value === "object";
-  const presets = ["week", "month", "year", "all"];
+  const presets = [{ k: "week", l: t.weekly }, { k: "month", l: t.monthly }, { k: "year", l: t.yearly }, { k: "all", l: t.allTime }];
   const applyCustom = () => { if (customFrom && customTo) { onChange({ from: customFrom, to: customTo }); setShowCustom(false); } };
   return (
     <div style={{ marginTop: 12 }}>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         {presets.map((f) => (
-          <button key={f} onClick={() => { onChange(f); setShowCustom(false); }} style={{ ...S.filterBtn, ...(!isCustom && value === f ? S.filterBtnActive : {}) }}>
-            {f === "all" ? "All Time" : f.charAt(0).toUpperCase() + f.slice(1) + "ly"}
+          <button key={f.k} onClick={() => { onChange(f.k); setShowCustom(false); }} style={{ ...S.filterBtn, ...(!isCustom && value === f.k ? S.filterBtnActive : {}) }}>
+            {f.l}
           </button>
         ))}
         <button onClick={() => setShowCustom(!showCustom)} style={{ ...S.filterBtn, ...(isCustom ? S.filterBtnActive : {}), display: "flex", alignItems: "center", gap: 4 }}>
-          📅 {isCustom ? `${value.from} → ${value.to}` : "Custom"}
+          📅 {isCustom ? `${value.from} → ${value.to}` : t.custom}
         </button>
       </div>
       {showCustom && (
         <div style={{ marginTop: 10, background: "#16161f", border: "1px solid #2a2a3a", borderRadius: 10, padding: 14, display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <div><label style={{ ...S.label, fontSize: 10 }}>From</label><input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} style={{ ...S.input, width: 150, padding: "7px 10px", fontSize: 13 }} /></div>
-          <div><label style={{ ...S.label, fontSize: 10 }}>To</label><input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} style={{ ...S.input, width: 150, padding: "7px 10px", fontSize: 13 }} /></div>
-          <button onClick={applyCustom} disabled={!customFrom || !customTo} style={{ ...S.primaryBtn, padding: "8px 16px", fontSize: 12, opacity: (!customFrom || !customTo) ? .4 : 1 }}>Apply</button>
+          <div><label style={{ ...S.label, fontSize: 10 }}>{t.from}</label><input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} style={{ ...S.input, width: 150, padding: "7px 10px", fontSize: 13 }} /></div>
+          <div><label style={{ ...S.label, fontSize: 10 }}>{t.to}</label><input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} style={{ ...S.input, width: 150, padding: "7px 10px", fontSize: 13 }} /></div>
+          <button onClick={applyCustom} disabled={!customFrom || !customTo} style={{ ...S.primaryBtn, padding: "8px 16px", fontSize: 12, opacity: (!customFrom || !customTo) ? .4 : 1 }}>{t.apply}</button>
         </div>
       )}
     </div>
@@ -308,7 +318,8 @@ function BarChart({ items, colorFrom, colorTo }) {
 }
 
 /* ═══════ LOGIN PAGE ═══════ */
-function LoginPage() {
+function LoginPage({ lang, changeLang }) {
+  const t = useT();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -323,8 +334,18 @@ function LoginPage() {
   };
 
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0e0e14", fontFamily: "'Inter', sans-serif" }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0e0e14", fontFamily: "'Inter', sans-serif", direction: lang === "ar" ? "rtl" : "ltr" }}>
       <div style={{ width: 380, padding: 40, background: "#111118", borderRadius: 16, border: "1px solid #1e1e2a", boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
+        {/* Language switcher on login page */}
+        <div style={{ display: "flex", justifyContent: "center", gap: 6, marginBottom: 20 }}>
+          {LANGS.map(l => (
+            <button key={l.id} onClick={() => changeLang(l.id)} style={{
+              padding: "5px 12px", border: lang === l.id ? "1px solid #E81224" : "1px solid #2a2a3a",
+              background: lang === l.id ? "#E8122422" : "transparent", color: lang === l.id ? "#E81224" : "#888",
+              borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "'Inter', sans-serif"
+            }}>{l.flag} {l.label}</button>
+          ))}
+        </div>
         <div style={{ textAlign: "center", marginBottom: 32 }}>
           <svg width="56" height="56" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
             <circle cx="18" cy="18" r="17" fill="#111118" stroke="#E81224" strokeWidth="2"/>
@@ -334,16 +355,16 @@ function LoginPage() {
           <h1 style={{ fontSize: 28, fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, color: "#fff", marginTop: 12, letterSpacing: 2 }}>
             <span style={{ color: "#E81224" }}>BB</span> MOTO
           </h1>
-          <div style={{ fontSize: 11, color: "#666", letterSpacing: 3, textTransform: "uppercase", fontFamily: "'Rajdhani', sans-serif" }}>Tanger · Management System</div>
+          <div style={{ fontSize: 11, color: "#666", letterSpacing: 3, textTransform: "uppercase", fontFamily: "'Rajdhani', sans-serif" }}>{t.managementSystem}</div>
         </div>
 
         <div style={{ marginBottom: 16 }}>
-          <label style={{ display: "block", fontSize: 11, color: "#888", marginBottom: 4, textTransform: "uppercase", letterSpacing: .5, fontFamily: "'Rajdhani', sans-serif", fontWeight: 600 }}>Email</label>
+          <label style={{ display: "block", fontSize: 11, color: "#888", marginBottom: 4, textTransform: "uppercase", letterSpacing: .5, fontFamily: "'Rajdhani', sans-serif", fontWeight: 600 }}>{t.email}</label>
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="your@email.com"
             style={{ width: "100%", padding: "12px 14px", border: "1px solid #2a2a3a", borderRadius: 8, fontSize: 14, fontFamily: "'Inter', sans-serif", outline: "none", boxSizing: "border-box", background: "#0e0e14", color: "#e0e0e8" }} />
         </div>
         <div style={{ marginBottom: 20 }}>
-          <label style={{ display: "block", fontSize: 11, color: "#888", marginBottom: 4, textTransform: "uppercase", letterSpacing: .5, fontFamily: "'Rajdhani', sans-serif", fontWeight: 600 }}>Password</label>
+          <label style={{ display: "block", fontSize: 11, color: "#888", marginBottom: 4, textTransform: "uppercase", letterSpacing: .5, fontFamily: "'Rajdhani', sans-serif", fontWeight: 600 }}>{t.password}</label>
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••"
             style={{ width: "100%", padding: "12px 14px", border: "1px solid #2a2a3a", borderRadius: 8, fontSize: 14, fontFamily: "'Inter', sans-serif", outline: "none", boxSizing: "border-box", background: "#0e0e14", color: "#e0e0e8" }} />
         </div>
@@ -352,11 +373,11 @@ function LoginPage() {
 
         <button onClick={handleLogin} disabled={loading}
           style={{ width: "100%", padding: "13px", background: "linear-gradient(135deg, #E81224, #b30e1c)", color: "#fff", border: "none", borderRadius: 8, fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "'Rajdhani', sans-serif", letterSpacing: 1, textTransform: "uppercase", opacity: loading ? .6 : 1 }}>
-          {loading ? "Signing in..." : "Sign In"}
+          {loading ? t.signingIn : t.signIn}
         </button>
 
         <div style={{ textAlign: "center", marginTop: 20, fontSize: 12, color: "#555" }}>
-          Authorized personnel only
+          {t.authorizedOnly}
         </div>
       </div>
     </div>
@@ -365,6 +386,7 @@ function LoginPage() {
 
 /* ═══════ DASHBOARD ═══════ */
 function Dashboard({ data, timeRange, setTimeRange }) {
+  const t = useT();
   const fRev = data.revenue.filter((r) => isInRange(r.date, timeRange));
   const fExp = data.expenses.filter((e) => isInRange(e.date, timeRange));
   const totalRev = fRev.reduce((s, r) => s + Number(r.amount), 0);
@@ -389,20 +411,20 @@ function Dashboard({ data, timeRange, setTimeRange }) {
     <div>
       <TimeFilter value={timeRange} onChange={setTimeRange} />
       <div style={S.statGrid}>
-        <StatCard label="Total Revenue" value={currency(totalRev)} accent="#16a34a" sub={totalDepositsKept > 0 ? `Incl. ${currency(totalDepositsKept)} deposits kept` : undefined} />
-        <StatCard label="Total Expenses" value={currency(totalExp)} accent="#dc2626" />
-        <StatCard label="Net Profit" value={currency(profit)} accent={profit >= 0 ? "#16a34a" : "#dc2626"} />
-        <StatCard label="Active Contracts" value={activeContracts} accent="#E81224" />
-        <StatCard label="Cash Register" value={currency(cashBalance)} accent="#7c3aed" />
-        <StatCard label="In Bank" value={currency(bankBalance)} accent="#0891b2" />
+        <StatCard label={t.totalRevenue} value={currency(totalRev)} accent="#16a34a" sub={totalDepositsKept > 0 ? `${t.inclDepositsKept.replace("{amount}", currency(totalDepositsKept))}` : undefined} />
+        <StatCard label={t.totalExpenses} value={currency(totalExp)} accent="#dc2626" />
+        <StatCard label={t.netProfit} value={currency(profit)} accent={profit >= 0 ? "#16a34a" : "#dc2626"} />
+        <StatCard label={t.activeContracts} value={activeContracts} accent="#E81224" />
+        <StatCard label={t.cashRegister} value={currency(cashBalance)} accent="#7c3aed" />
+        <StatCard label={t.inBank} value={currency(bankBalance)} accent="#0891b2" />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginTop: 24 }}>
-        <div style={S.card}><h4 style={S.cardTitle}>Top Performing Vehicles</h4>
-          {topV.length === 0 && <p style={S.empty}>Add vehicles & revenue to see performance</p>}
-          <BarChart items={topV.map(v => ({ label: v.name, value: v.rev, sub: `Rentals: ${currency(v.rev - v.depKept)}${v.depKept > 0 ? ` · Deposits kept: ${currency(v.depKept)}` : ""} · Exp: ${currency(v.exp)} · Profit: ${currency(v.rev - v.exp)}` }))} colorFrom="#E81224" colorTo="#ff4757" />
+        <div style={S.card}><h4 style={S.cardTitle}>{t.topPerformingVehicles}</h4>
+          {topV.length === 0 && <p style={S.empty}>{t.addVehiclesRevenue}</p>}
+          <BarChart items={topV.map(v => ({ label: v.name, value: v.rev, sub: `${t.rentals}: ${currency(v.rev - v.depKept)}${v.depKept > 0 ? ` · ${t.depositsKept}: ${currency(v.depKept)}` : ""} · ${t.exp}: ${currency(v.exp)} · ${t.profit}: ${currency(v.rev - v.exp)}` }))} colorFrom="#E81224" colorTo="#ff4757" />
         </div>
-        <div style={S.card}><h4 style={S.cardTitle}>Revenue by Category</h4>
-          {Object.keys(catRev).length === 0 && <p style={S.empty}>No revenue data yet</p>}
+        <div style={S.card}><h4 style={S.cardTitle}>{t.revenueByCategory}</h4>
+          {Object.keys(catRev).length === 0 && <p style={S.empty}>{t.noRevenueData}</p>}
           {Object.entries(catRev).sort((a, b) => b[1] - a[1]).map(([cat, rev]) => (
             <div key={cat} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #1e1e2a", fontSize: 14 }}>
               <span>{cat}</span><span style={{ fontFamily: "'Space Mono', monospace", fontSize: 13, color: "#16a34a" }}>{currency(rev)}</span>
@@ -421,6 +443,8 @@ function Fleet({ data, db, profile }) {
   const [form, setForm] = useState(emptyForm);
   const [editId, setEditId] = useState(null);
   const isAdmin = profile?.role === "admin";
+  const t = useT();
+  const t = useT();
 
   const handleSave = async () => {
     if (!form.name) return;
@@ -434,8 +458,8 @@ function Fleet({ data, db, profile }) {
 
   return (
     <div>
-      <div style={S.sectionHeader}><h3 style={{ margin: 0, color: "#e0e0e8" }}>Fleet Management</h3>
-        <button style={S.primaryBtn} onClick={() => { setEditId(null); setForm(emptyForm); setShowForm(true); }}>+ Add Vehicle</button></div>
+      <div style={S.sectionHeader}><h3 style={{ margin: 0, color: "#e0e0e8" }}>{t.fleetManagement}</h3>
+        <button style={S.primaryBtn} onClick={() => { setEditId(null); setForm(emptyForm); setShowForm(true); }}>{t.addVehicle}</button></div>
       {showForm && (
         <Modal title={editId ? "Edit Vehicle" : "Add Vehicle"} onClose={() => setShowForm(false)}>
           <Inp label="Vehicle Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Honda PCX #3" />
@@ -486,6 +510,7 @@ function Contracts({ data, db, profile }) {
   const [showKeepDeposit, setShowKeepDeposit] = useState(null);
   const [keepForm, setKeepForm] = useState({ keptAmount: "", damageNotes: "" });
   const isAdmin = profile?.role === "admin";
+  const t = useT();
 
   const autoCalc = (f) => { const v = data.vehicles.find(vv => vv.id === f.vehicleId); if (v && f.startDate && f.endDate && f.season) { const days = Math.max(1, Math.ceil((new Date(f.endDate) - new Date(f.startDate)) / 86400000)); const rate = Number(v[`rate_${f.season}`] || 0); if (rate > 0) return { ...f, totalAmount: String(days * rate) }; } return f; };
   const handleSave = async () => { if (!form.clientName || !form.vehicleId) return; if (editId) await db.updateContract(editId, form); else await db.addContract(form); setForm(emptyForm); setShowForm(false); setEditId(null); };
@@ -500,8 +525,8 @@ function Contracts({ data, db, profile }) {
 
   return (
     <div>
-      <div style={S.sectionHeader}><h3 style={{ margin: 0, color: "#e0e0e8" }}>Client Contracts</h3>
-        <button style={S.primaryBtn} onClick={() => { setEditId(null); setForm(emptyForm); setShowForm(true); }}>+ New Contract</button></div>
+      <div style={S.sectionHeader}><h3 style={{ margin: 0, color: "#e0e0e8" }}>{t.clientContracts}</h3>
+        <button style={S.primaryBtn} onClick={() => { setEditId(null); setForm(emptyForm); setShowForm(true); }>>{t.newContract}</button></div>
       <input style={{ ...S.input, marginBottom: 16, marginTop: 12 }} placeholder="Search by client name, phone or ID..." value={search} onChange={(e) => setSearch(e.target.value)} />
       {showForm && (
         <Modal title={editId ? "Edit Contract" : "New Contract"} onClose={() => setShowForm(false)} wide>
@@ -552,6 +577,7 @@ function Expenses({ data, db, profile, timeRange, setTimeRange }) {
   const [showForm, setShowForm] = useState(false);
   const emptyForm = { description: "", amount: "", date: today(), category: "Fuel", vehicleId: "", paidFrom: "cash", notes: "" };
   const [form, setForm] = useState(emptyForm); const isAdmin = profile?.role === "admin";
+  const t = useT();
   const expCats = ["Fuel", "Maintenance", "Insurance", "Rent", "Utilities", "Salary", "Marketing", "Parts", "Tires", "Oil Change", "Registration", "Other"];
 
   const handleSave = async () => { if (!form.description || !form.amount) return; await db.addExpense(form); setForm(emptyForm); setShowForm(false); };
@@ -567,7 +593,7 @@ function Expenses({ data, db, profile, timeRange, setTimeRange }) {
 
   return (
     <div>
-      <div style={S.sectionHeader}><h3 style={{ margin: 0, color: "#e0e0e8" }}>Expenses Tracker</h3><button style={S.primaryBtn} onClick={() => { setForm(emptyForm); setShowForm(true); }}>+ Add Expense</button></div>
+      <div style={S.sectionHeader}><h3 style={{ margin: 0, color: "#e0e0e8" }}>{t.expensesTracker}</h3><button style={S.primaryBtn} onClick={() => { setForm(emptyForm); setShowForm(true); }>>{t.addExpense}</button></div>
       <TimeFilter value={timeRange} onChange={setTimeRange} />
       <div style={S.statGrid}>
         <StatCard label="Total Expenses" value={currency(total)} accent="#dc2626" />
@@ -603,6 +629,7 @@ function RevenueTab({ data, db, profile, timeRange, setTimeRange }) {
   const [showForm, setShowForm] = useState(false);
   const emptyForm = { description: "", amount: "", date: today(), vehicleId: "", contractId: "", source: "Rental" };
   const [form, setForm] = useState(emptyForm); const isAdmin = profile?.role === "admin";
+  const t = useT();
 
   const handleSave = async () => { if (!form.amount) return; await db.addRevenue(form); setForm(emptyForm); setShowForm(false); };
   const handleDelete = async (id) => { if (confirm("Delete revenue?")) await db.deleteRevenue(id); };
@@ -617,7 +644,7 @@ function RevenueTab({ data, db, profile, timeRange, setTimeRange }) {
 
   return (
     <div>
-      <div style={S.sectionHeader}><h3 style={{ margin: 0, color: "#e0e0e8" }}>Revenue Tracker</h3><button style={S.primaryBtn} onClick={() => { setForm(emptyForm); setShowForm(true); }}>+ Add Revenue</button></div>
+      <div style={S.sectionHeader}><h3 style={{ margin: 0, color: "#e0e0e8" }}>{t.revenueTracker}</h3><button style={S.primaryBtn} onClick={() => { setForm(emptyForm); setShowForm(true); }>>{t.addRevenue}</button></div>
       <TimeFilter value={timeRange} onChange={setTimeRange} />
       <div style={S.statGrid}>
         <StatCard label="Total Revenue" value={currency(total)} accent="#16a34a" />
@@ -651,6 +678,7 @@ function CashBank({ data, db, profile, timeRange, setTimeRange }) {
   const [showForm, setShowForm] = useState(false); const [formType, setFormType] = useState("deposit");
   const emptyForm = { amount: "", date: today(), description: "", reference: "" };
   const [form, setForm] = useState(emptyForm); const isAdmin = profile?.role === "admin";
+  const t = useT();
   const ops = data.cashOps;
   const cashBalance = ops.reduce((s, op) => { if (op.type === "in" || op.type === "withdrawal") return s + Number(op.amount); if (op.type === "out" || op.type === "deposit") return s - Number(op.amount); return s; }, 0);
   const totalDeposited = ops.filter(o => o.type === "deposit").reduce((s, o) => s + Number(o.amount), 0);
@@ -665,9 +693,9 @@ function CashBank({ data, db, profile, timeRange, setTimeRange }) {
 
   return (
     <div>
-      <div style={S.sectionHeader}><h3 style={{ margin: 0, color: "#e0e0e8" }}>Cash Register & Bank</h3>
-        <div style={{ display: "flex", gap: 8 }}><button style={S.primaryBtn} onClick={() => { setFormType("deposit"); setForm(emptyForm); setShowForm(true); }}>🏦 Bank Deposit</button>
-          <button style={{ ...S.primaryBtn, background: "linear-gradient(135deg, #7c3aed, #5b21b6)" }} onClick={() => { setFormType("withdrawal"); setForm(emptyForm); setShowForm(true); }}>💵 Withdrawal</button></div></div>
+      <div style={S.sectionHeader}><h3 style={{ margin: 0, color: "#e0e0e8" }}>{t.cashRegisterBank}</h3>
+        <div style={{ display: "flex", gap: 8 }}><button style={S.primaryBtn} onClick={() => { setFormType("deposit"); setForm(emptyForm); setShowForm(true); }}>{t.bankDeposit}</button>
+          <button style={{ ...S.primaryBtn, background: "linear-gradient(135deg, #7c3aed, #5b21b6)" }} onClick={() => { setFormType("withdrawal"); setForm(emptyForm); setShowForm(true); }}>{t.withdrawal}</button></div></div>
       <TimeFilter value={timeRange} onChange={setTimeRange} />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginTop: 16 }}>
         <div style={{ background: "linear-gradient(135deg, #1a0a0c, #3a1015)", borderRadius: 14, padding: 24, color: "#fff", border: "1px solid #E8122433" }}>
@@ -710,6 +738,13 @@ export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [timeRange, setTimeRange] = useState("month");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [lang, setLang] = useState(() => localStorage.getItem("bb-moto-lang") || "en");
+
+  const t = translations[lang] || translations.en;
+  const isRTL = lang === "ar";
+  const TABS = TABS_DEF.map(td => ({ ...td, label: t[td.key] || td.key }));
+
+  const changeLang = (l) => { setLang(l); localStorage.setItem("bb-moto-lang", l); };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); setAuthLoading(false); });
@@ -728,11 +763,12 @@ export default function App() {
 
   const handleLogout = async () => { await supabase.auth.signOut(); };
 
-  if (authLoading) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0e0e14", fontFamily: "'Inter', sans-serif", color: "#666" }}>Loading...</div>;
-  if (!session) return <LoginPage />;
+  if (authLoading) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#0e0e14", fontFamily: "'Inter', sans-serif", color: "#666" }}>{t.loading}</div>;
+  if (!session) return <LangContext.Provider value={lang}><LoginPage lang={lang} changeLang={changeLang} /></LangContext.Provider>;
 
   return (
-    <div style={S.root}>
+    <LangContext.Provider value={lang}>
+    <div style={{ ...S.root, direction: isRTL ? "rtl" : "ltr" }}>
       <style>{`
         option { background: #111118; color: #e0e0e8; }
         select option:checked { background: #E81224; color: #fff; }
@@ -749,22 +785,32 @@ export default function App() {
         </div>
         <button onClick={() => setSidebarOpen(!sidebarOpen)} style={S.collapseBtn}>{sidebarOpen ? "◀" : "▶"}</button>
         <nav style={{ marginTop: 24, flex: 1 }}>
-          {TABS.map((t) => (<button key={t.id} onClick={() => setTab(t.id)} style={{ ...S.navBtn, ...(tab === t.id ? S.navBtnActive : {}), justifyContent: sidebarOpen ? "flex-start" : "center" }}><span style={{ fontSize: 18 }}>{t.icon}</span>{sidebarOpen && <span style={{ marginLeft: 10 }}>{t.label}</span>}</button>))}
+          {TABS.map((tb) => (<button key={tb.id} onClick={() => setTab(tb.id)} style={{ ...S.navBtn, ...(tab === tb.id ? S.navBtnActive : {}), justifyContent: sidebarOpen ? "flex-start" : "center" }}><span style={{ fontSize: 18 }}>{tb.icon}</span>{sidebarOpen && <span style={{ marginLeft: isRTL ? 0 : 10, marginRight: isRTL ? 10 : 0 }}>{tb.label}</span>}</button>))}
         </nav>
         {sidebarOpen && (
           <div style={{ borderTop: "1px solid #1e1e2a", paddingTop: 12 }}>
+            {/* Language switcher */}
+            <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
+              {LANGS.map(l => (
+                <button key={l.id} onClick={() => changeLang(l.id)} style={{
+                  flex: 1, padding: "5px 0", border: lang === l.id ? "1px solid #E81224" : "1px solid #2a2a3a",
+                  background: lang === l.id ? "#E8122422" : "#111118", color: lang === l.id ? "#E81224" : "#888",
+                  borderRadius: 6, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "'Inter', sans-serif"
+                }}>{l.flag} {l.label}</button>
+              ))}
+            </div>
             <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>{profile?.full_name || user?.email}</div>
             <div style={{ fontSize: 10, color: "#E81224", textTransform: "uppercase", fontWeight: 700, fontFamily: "'Rajdhani', sans-serif", letterSpacing: 1, marginBottom: 8 }}>{profile?.role || "agent"}</div>
-            <button onClick={handleLogout} style={S.resetBtn}>Sign Out</button>
+            <button onClick={handleLogout} style={S.resetBtn}>{t.signOut}</button>
           </div>
         )}
       </div>
       <div style={S.main}>
         <div style={S.topBar}>
-          <h2 style={{ margin: 0, fontSize: 20, color: "#f0f0f5", fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, letterSpacing: .5 }}>{TABS.find((t) => t.id === tab)?.icon} {TABS.find((t) => t.id === tab)?.label}</h2>
+          <h2 style={{ margin: 0, fontSize: 20, color: "#f0f0f5", fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, letterSpacing: .5 }}>{TABS.find((tb) => tb.id === tab)?.icon} {TABS.find((tb) => tb.id === tab)?.label}</h2>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            {db.loading && <span style={{ fontSize: 12, color: "#E81224" }}>Syncing...</span>}
-            <div style={{ fontSize: 12, color: "#666", fontFamily: "'Space Mono', monospace" }}>{new Date().toLocaleDateString("en-MA", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</div>
+            {db.loading && <span style={{ fontSize: 12, color: "#E81224" }}>{t.syncing}</span>}
+            <div style={{ fontSize: 12, color: "#666", fontFamily: "'Space Mono', monospace" }}>{new Date().toLocaleDateString(lang === "ar" ? "ar-MA" : lang === "fr" ? "fr-MA" : "en-MA", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</div>
           </div>
         </div>
         <div style={S.content}>
@@ -777,6 +823,7 @@ export default function App() {
         </div>
       </div>
     </div>
+    </LangContext.Provider>
   );
 }
 
