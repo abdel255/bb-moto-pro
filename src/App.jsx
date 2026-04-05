@@ -528,9 +528,14 @@ function Contracts({ data, db, profile }) {
   const getDuration = (f) => calcDuration(f.startDate, f.startTime, f.endDate, f.endTime);
 
   const autoCalc = (f) => {
-    if (f.season === "custom") return f;
-    const v = data.vehicles.find(vv => vv.id === f.vehicleId);
     const dur = getDuration(f);
+    if (f.season === "custom") {
+      if (dur && f.customPrice && Number(f.customPrice) > 0) {
+        return { ...f, totalAmount: String(dur.totalDays * Number(f.customPrice)) };
+      }
+      return f;
+    }
+    const v = data.vehicles.find(vv => vv.id === f.vehicleId);
     if (v && dur && f.season) {
       const rate = Number(v[`rate_${f.season}`] || 0);
       if (rate > 0) return { ...f, totalAmount: String(dur.totalDays * rate) };
@@ -603,10 +608,10 @@ function Contracts({ data, db, profile }) {
           {form.vehicleId && form.season && (() => { 
             if (form.season === "custom") return (
               <div style={{ background: "#1a152a", border: "1px solid #7c3aed44", borderRadius: 10, padding: 14, marginBottom: 12 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#a855f7", marginBottom: 8, textTransform: "uppercase", letterSpacing: 1, fontFamily: "'Rajdhani', sans-serif" }}>💜 Negotiated Price</div>
-                <input type="number" placeholder="Enter agreed price in MAD" style={{ ...S.input, fontSize: 18, fontWeight: 700, fontFamily: "'Space Mono', monospace", padding: "12px 14px", borderColor: "#7c3aed44" }} value={form.customPrice} onChange={(e) => setForm({ ...form, customPrice: e.target.value, totalAmount: e.target.value })} />
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#a855f7", marginBottom: 8, textTransform: "uppercase", letterSpacing: 1, fontFamily: "'Rajdhani', sans-serif" }}>💜 Custom Daily Rate</div>
+                <input type="number" placeholder="Enter negotiated daily rate in MAD" style={{ ...S.input, fontSize: 18, fontWeight: 700, fontFamily: "'Space Mono', monospace", padding: "12px 14px", borderColor: "#7c3aed44" }} value={form.customPrice} onChange={(e) => { const f = { ...form, customPrice: e.target.value }; setForm(autoCalc(f)); }} />
                 {dur && form.customPrice && Number(form.customPrice) > 0 && (
-                  <div style={{ fontSize: 12, color: "#888", marginTop: 6 }}>≈ {currency(Math.round(Number(form.customPrice) / dur.totalDays))}/day for {dur.totalDays} day{dur.totalDays > 1 ? "s" : ""}</div>
+                  <div style={{ fontSize: 13, color: "#a855f7", marginTop: 8, fontWeight: 600 }}>{currency(form.customPrice)}/day × {dur.totalDays} day{dur.totalDays > 1 ? "s" : ""} = <span style={{ fontSize: 16, color: "#c084fc" }}>{currency(dur.totalDays * Number(form.customPrice))}</span></div>
                 )}
               </div>
             );
