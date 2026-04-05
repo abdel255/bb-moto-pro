@@ -7,7 +7,7 @@ const SEASONS = [
   { id: "low", label: "Low Season", color: "#60a5fa" },
   { id: "mid", label: "Mid Season", color: "#f59e0b" },
   { id: "high", label: "High Season", color: "#ef4444" },
-  { id: "custom", label: "Custom", color: "#a855f7" },
+  { id: "custom", label: "Custom Price", color: "#a855f7" },
 ];
 const TABS_DEF = [
   { id: "dashboard", key: "dashboard", icon: "📊" },
@@ -66,7 +66,7 @@ function useSupabaseData(user) {
   const addVehicle = async (form) => {
     const { data: row, error } = await supabase.from("vehicles").insert({
       name: form.name, plate: form.plate, category: form.category, status: form.status,
-      rate_low: Number(form.rates?.low) || 0, rate_mid: Number(form.rates?.mid) || 0, rate_high: Number(form.rates?.high) || 0, rate_custom: Number(form.rates?.custom) || 0,
+      rate_low: Number(form.rates?.low) || 0, rate_mid: Number(form.rates?.mid) || 0, rate_high: Number(form.rates?.high) || 0,
       notes: form.notes, created_by: user.id,
     }).select().single();
     if (!error) { await logActivity("create", "vehicle", row.id, { name: form.name }); await fetchAll(); }
@@ -76,7 +76,7 @@ function useSupabaseData(user) {
   const updateVehicle = async (id, form) => {
     const { error } = await supabase.from("vehicles").update({
       name: form.name, plate: form.plate, category: form.category, status: form.status,
-      rate_low: Number(form.rates?.low) || 0, rate_mid: Number(form.rates?.mid) || 0, rate_high: Number(form.rates?.high) || 0, rate_custom: Number(form.rates?.custom) || 0,
+      rate_low: Number(form.rates?.low) || 0, rate_mid: Number(form.rates?.mid) || 0, rate_high: Number(form.rates?.high) || 0,
       notes: form.notes, updated_at: new Date().toISOString(),
     }).eq("id", id);
     if (!error) { await logActivity("update", "vehicle", id, { name: form.name }); await fetchAll(); }
@@ -452,9 +452,9 @@ function Fleet({ data, db, profile }) {
     else await db.addVehicle(form);
     setForm(emptyForm); setShowForm(false); setEditId(null);
   };
-  const handleEdit = (v) => { setForm({ ...v, rates: { low: v.rate_low || "", mid: v.rate_mid || "", high: v.rate_high || "", custom: v.rate_custom || "" } }); setEditId(v.id); setShowForm(true); };
+  const handleEdit = (v) => { setForm({ ...v, rates: { low: v.rate_low || "", mid: v.rate_mid || "", high: v.rate_high || "" } }); setEditId(v.id); setShowForm(true); };
   const handleDelete = async (id) => { if (confirm("Delete this vehicle?")) await db.deleteVehicle(id); };
-  const getRate = (v) => ({ low: v.rate_low || "—", mid: v.rate_mid || "—", high: v.rate_high || "—", custom: v.rate_custom || "—" });
+  const getRate = (v) => ({ low: v.rate_low || "—", mid: v.rate_mid || "—", high: v.rate_high || "—" });
 
   return (
     <div>
@@ -467,8 +467,8 @@ function Fleet({ data, db, profile }) {
           <Inp label="Category" type="select" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{DEFAULT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}</Inp>
           <div style={{ background: "#111118", border: "1px solid #2a2a3a", borderRadius: 10, padding: 16, marginBottom: 14 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#e0e0e8", marginBottom: 10 }}>Daily Rates by Season (MAD)</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
-              {SEASONS.map((s) => (<div key={s.id}><label style={{ ...S.label, color: s.color, fontSize: 11 }}>{s.label}</label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+              {SEASONS.filter(s => s.id !== "custom").map((s) => (<div key={s.id}><label style={{ ...S.label, color: s.color, fontSize: 11 }}>{s.label}</label>
                 <input type="number" placeholder="MAD" style={S.input} value={form.rates?.[s.id] || ""} onChange={(e) => setForm({ ...form, rates: { ...form.rates, [s.id]: e.target.value } })} /></div>))}
             </div></div>
           <Inp label="Status" type="select" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
@@ -488,7 +488,7 @@ function Fleet({ data, db, profile }) {
             </div>
             <div style={{ fontSize: 13, color: "#777", marginTop: 8 }}><span style={S.tag}>{v.category}</span></div>
             <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-              {SEASONS.map((s) => (<div key={s.id} style={{ flex: 1, background: "#111118", border: "1px solid #2a2a3a", borderRadius: 6, padding: "6px 8px", textAlign: "center" }}>
+              {SEASONS.filter(s => s.id !== "custom").map((s) => (<div key={s.id} style={{ flex: 1, background: "#111118", border: "1px solid #2a2a3a", borderRadius: 6, padding: "6px 8px", textAlign: "center" }}>
                 <div style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: .5, color: s.color, fontWeight: 700 }}>{s.label.replace(" Season", "")}</div>
                 <div style={{ fontSize: 13, fontWeight: 600, fontFamily: "'Space Mono', monospace", color: "#e0e0e8", marginTop: 2 }}>{rates[s.id] || "—"}</div></div>))}
             </div>
@@ -512,7 +512,7 @@ function Contracts({ data, db, profile }) {
   const isAdmin = profile?.role === "admin";
   const t = useT();
 
-  const autoCalc = (f) => { const v = data.vehicles.find(vv => vv.id === f.vehicleId); if (v && f.startDate && f.endDate && f.season) { const days = Math.max(1, Math.ceil((new Date(f.endDate) - new Date(f.startDate)) / 86400000)); const rate = Number(v[`rate_${f.season}`] || 0); if (rate > 0) return { ...f, totalAmount: String(days * rate) }; } return f; };
+  const autoCalc = (f) => { if (f.season === "custom") return f; const v = data.vehicles.find(vv => vv.id === f.vehicleId); if (v && f.startDate && f.endDate && f.season) { const days = Math.max(1, Math.ceil((new Date(f.endDate) - new Date(f.startDate)) / 86400000)); const rate = Number(v[`rate_${f.season}`] || 0); if (rate > 0) return { ...f, totalAmount: String(days * rate) }; } return f; };
   const handleSave = async () => { if (!form.clientName || !form.vehicleId) return; if (editId) await db.updateContract(editId, form); else await db.addContract(form); setForm(emptyForm); setShowForm(false); setEditId(null); };
   const handleEdit = (c) => { setForm({ clientName: c.client_name, clientPhone: c.client_phone, clientId: c.client_id, vehicleId: c.vehicle_id, startDate: c.start_date, endDate: c.end_date || "", season: c.season, totalAmount: String(c.total_amount), deposit: String(c.deposit), status: c.status, notes: c.notes }); setEditId(c.id); setShowForm(true); };
   const handleDelete = async (id) => { if (confirm("Delete contract?")) await db.deleteContract(id); };
@@ -538,7 +538,9 @@ function Contracts({ data, db, profile }) {
             <Inp label="End Date" type="date" value={form.endDate} onChange={(e) => { setForm(autoCalc({ ...form, endDate: e.target.value })); }} />
             <Inp label="Season" type="select" value={form.season} onChange={(e) => { setForm(autoCalc({ ...form, season: e.target.value })); }}>{SEASONS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}</Inp>
           </div>
-          {form.vehicleId && form.season && (() => { const v = data.vehicles.find(vv => vv.id === form.vehicleId); const rate = v?.[`rate_${form.season}`]; if (!rate) return null; const days = form.startDate && form.endDate ? Math.max(1, Math.ceil((new Date(form.endDate) - new Date(form.startDate)) / 86400000)) : 0; return (<div style={{ background: "#2a2210", border: "1px solid #5c4a1a", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#fbbf24" }}>Rate: <strong>{currency(rate)}/day</strong> ({SEASONS.find(s => s.id === form.season)?.label}){days > 0 && <> · {days} days = <strong>{currency(days * Number(rate))}</strong></>}</div>); })()}
+          {form.vehicleId && form.season && (() => { 
+            if (form.season === "custom") return (<div style={{ background: "#1a152a", border: "1px solid #7c3aed44", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#a855f7" }}>Custom price — enter the negotiated total amount below.</div>);
+            const v = data.vehicles.find(vv => vv.id === form.vehicleId); const rate = v?.[`rate_${form.season}`]; if (!rate) return null; const days = form.startDate && form.endDate ? Math.max(1, Math.ceil((new Date(form.endDate) - new Date(form.startDate)) / 86400000)) : 0; return (<div style={{ background: "#2a2210", border: "1px solid #5c4a1a", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#fbbf24" }}>Rate: <strong>{currency(rate)}/day</strong> ({SEASONS.find(s => s.id === form.season)?.label}){days > 0 && <> · {days} days = <strong>{currency(days * Number(rate))}</strong></>}</div>); })()}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}><Inp label="Total Amount (MAD)" type="number" value={form.totalAmount} onChange={(e) => setForm({ ...form, totalAmount: e.target.value })} /><Inp label="Deposit (MAD)" type="number" value={form.deposit} onChange={(e) => setForm({ ...form, deposit: e.target.value })} /></div>
           <Inp label="Status" type="select" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}><option value="active">Active</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></Inp>
           <Inp label="Notes" type="textarea" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
