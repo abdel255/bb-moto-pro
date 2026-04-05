@@ -75,9 +75,11 @@ const translations = {
     low: "Low",
     mid: "Mid",
     high: "High",
+    custom: "Custom",
     lowSeason: "Low Season",
     midSeason: "Mid Season",
     highSeason: "High Season",
+    customSeason: "Custom",
 
     // Contracts
     clientContracts: "Client Contracts",
@@ -267,9 +269,11 @@ const translations = {
     low: "Bas",
     mid: "Moyen",
     high: "Haut",
+    custom: "Perso",
     lowSeason: "Basse Saison",
     midSeason: "Moyenne Saison",
     highSeason: "Haute Saison",
+    customSeason: "Personnalisé",
 
     clientContracts: "Contrats Clients",
     newContract: "+ Nouveau Contrat",
@@ -454,9 +458,11 @@ const translations = {
     low: "منخفض",
     mid: "متوسط",
     high: "مرتفع",
+    custom: "مخصص",
     lowSeason: "موسم منخفض",
     midSeason: "موسم متوسط",
     highSeason: "موسم مرتفع",
+    customSeason: "مخصص",
 
     clientContracts: "عقود العملاء",
     newContract: "+ عقد جديد",
