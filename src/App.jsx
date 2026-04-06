@@ -1,1435 +1,198 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-
-// ─── Supabase Client ───
-const SUPABASE_URL = "https://ysihfkrkqwyhahejbwzf.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlzaWhma3JrcXd5aGFoZWpid3pmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzNDk1NDcsImV4cCI6MjA5MDkyNTU0N30.OXoYLIz_tkkDzTPsIrNoUtpipeOfD4p2M-DP2MQmo6A";
-
-const supabase = {
-  headers: (token) => ({
-    apikey: SUPABASE_KEY,
-    Authorization: `Bearer ${token || SUPABASE_KEY}`,
-    "Content-Type": "application/json",
-    Prefer: "return=representation",
-  }),
-  async query(table, { select = "*", filters = "", order = "", token, single = false } = {}) {
-    let url = `${SUPABASE_URL}/rest/v1/${table}?select=${encodeURIComponent(select)}`;
-    if (filters) url += `&${filters}`;
-    if (order) url += `&order=${order}`;
-    const res = await fetch(url, { headers: this.headers(token) });
-    if (!res.ok) throw new Error(await res.text());
-    const data = await res.json();
-    return single ? data[0] : data;
-  },
-  async insert(table, body, token) {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-      method: "POST", headers: this.headers(token), body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  },
-  async update(table, body, filters, token) {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filters}`, {
-      method: "PATCH", headers: this.headers(token), body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  },
-  async remove(table, filters, token) {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filters}`, {
-      method: "DELETE", headers: this.headers(token),
-    });
-    if (!res.ok) throw new Error(await res.text());
-  },
-  async rpc(fn, args, token) {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
-      method: "POST", headers: this.headers(token), body: JSON.stringify(args),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  },
-  async signIn(email, password) {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-      method: "POST",
-      headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    if (!res.ok) throw new Error("Invalid credentials");
-    return res.json();
-  },
-  async signUp(email, password) {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
-      method: "POST",
-      headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    if (!res.ok) throw new Error("Sign up failed");
-    return res.json();
-  },
-};
-
-// ─── Icons (inline SVG) ───
-const Icon = ({ d, size = 20, color = "currentColor", ...props }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>{typeof d === "string" ? <path d={d} /> : d}</svg>
-);
-const Icons = {
-  dashboard: <Icon d={<><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>} />,
-  scooter: <Icon d={<><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M5 16.5h3l4-8h4l3 8"/><path d="M12 8.5V5h3"/></>} />,
-  contract: <Icon d={<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></>} />,
-  clients: <Icon d={<><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>} />,
-  money: <Icon d={<><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></>} />,
-  expense: <Icon d={<><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/><line x1="2" y1="12" x2="6" y2="8"/></>} />,
-  cash: <Icon d={<><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M2 10h2M20 10h2M2 14h2M20 14h2"/></>} />,
-  alert: <Icon d={<><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>} />,
-  logout: <Icon d={<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></>} />,
-  plus: <Icon d="M12 5v14M5 12h14" />,
-  search: <Icon d={<><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></>} />,
-  x: <Icon d="M18 6L6 18M6 6l12 12" />,
-  check: <Icon d="M20 6L9 17l-5-5" />,
-  edit: <Icon d={<><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></>} />,
-  trash: <Icon d={<><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></>} />,
-  ban: <Icon d={<><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></>} />,
-  chevDown: <Icon d="M6 9l6 6 6-6" size={16} />,
-  calendar: <Icon d={<><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></>} />,
-  fuel: <Icon d={<><path d="M3 22V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/><path d="M13 10h4a2 2 0 0 1 2 2v6a1 1 0 0 0 1 1 1 1 0 0 0 1-1V9l-3-3"/><rect x="5" y="8" width="6" height="5" rx="1"/></>} />,
-};
-
-// ─── Helpers ───
-const fmt = (n) => new Intl.NumberFormat("fr-MA", { style: "currency", currency: "MAD", minimumFractionDigits: 0 }).format(n || 0);
-const fmtDate = (d) => d ? new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }) : "—";
-const fmtDateShort = (d) => d ? new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) : "—";
-const daysBetween = (a, b) => Math.max(1, Math.ceil((new Date(b) - new Date(a)) / 86400000));
-const today = () => new Date().toISOString().slice(0, 10);
-const daysFromNow = (d) => d ? Math.ceil((new Date(d) - new Date()) / 86400000) : null;
-
-// ─── Styles ───
-const css = `
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,500;0,9..40,700;1,9..40,400&family=Space+Mono:wght@400;700&display=swap');
-
-:root {
-  --bg: #0A0C10;
-  --surface: #12151C;
-  --surface2: #1A1E28;
-  --border: #252A36;
-  --border2: #333A4A;
-  --text: #E8ECF4;
-  --text2: #8B95A8;
-  --text3: #5A6478;
-  --accent: #F97316;
-  --accent2: #FB923C;
-  --accent-bg: rgba(249,115,22,0.1);
-  --green: #22C55E;
-  --green-bg: rgba(34,197,94,0.1);
-  --red: #EF4444;
-  --red-bg: rgba(239,68,68,0.1);
-  --blue: #3B82F6;
-  --blue-bg: rgba(59,130,246,0.1);
-  --yellow: #EAB308;
-  --yellow-bg: rgba(234,179,8,0.1);
-  --purple: #A855F7;
-  --purple-bg: rgba(168,85,247,0.1);
-  --radius: 10px;
-  --shadow: 0 4px 24px rgba(0,0,0,0.4);
-  --font: 'DM Sans', sans-serif;
-  --mono: 'Space Mono', monospace;
-}
-
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: var(--bg); color: var(--text); font-family: var(--font); }
-input, select, textarea, button { font-family: inherit; }
-
-.app { display: flex; min-height: 100vh; }
-
-/* Sidebar */
-.sidebar {
-  width: 240px; min-height: 100vh; background: var(--surface);
-  border-right: 1px solid var(--border); display: flex; flex-direction: column;
-  position: fixed; left: 0; top: 0; bottom: 0; z-index: 100;
-}
-.sidebar-brand {
-  padding: 24px 20px; border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; gap: 12px;
-}
-.sidebar-brand .logo {
-  width: 40px; height: 40px; background: var(--accent);
-  border-radius: 10px; display: grid; place-items: center;
-  font-family: var(--mono); font-weight: 700; font-size: 14px; color: #fff;
-}
-.sidebar-brand h1 { font-size: 16px; font-weight: 700; letter-spacing: -0.3px; }
-.sidebar-brand span { font-size: 11px; color: var(--text2); display: block; margin-top: 1px; }
-.sidebar-nav { flex: 1; padding: 12px 8px; display: flex; flex-direction: column; gap: 2px; }
-.nav-item {
-  display: flex; align-items: center; gap: 12px; padding: 10px 14px;
-  border-radius: 8px; cursor: pointer; color: var(--text2);
-  font-size: 13.5px; font-weight: 500; transition: all 0.15s;
-  border: 1px solid transparent; position: relative;
-}
-.nav-item:hover { background: var(--surface2); color: var(--text); }
-.nav-item.active {
-  background: var(--accent-bg); color: var(--accent);
-  border-color: rgba(249,115,22,0.2);
-}
-.nav-item .badge {
-  position: absolute; right: 10px; background: var(--red);
-  color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px;
-  border-radius: 10px; min-width: 18px; text-align: center;
-}
-.sidebar-footer {
-  padding: 16px; border-top: 1px solid var(--border);
-}
-.sidebar-footer button {
-  width: 100%; display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border);
-  background: transparent; color: var(--text2); font-size: 13px;
-  cursor: pointer; transition: all 0.15s;
-}
-.sidebar-footer button:hover { border-color: var(--red); color: var(--red); }
-
-/* Main */
-.main { flex: 1; margin-left: 240px; }
-.topbar {
-  height: 60px; border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0 28px; background: var(--surface); position: sticky; top: 0; z-index: 50;
-}
-.topbar h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.3px; }
-.topbar-actions { display: flex; align-items: center; gap: 10px; }
-.content { padding: 24px 28px; }
-
-/* Cards / Stats */
-.stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-bottom: 24px; }
-.stat-card {
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 18px 20px; position: relative; overflow: hidden;
-}
-.stat-card::before {
-  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
-}
-.stat-card.orange::before { background: var(--accent); }
-.stat-card.green::before { background: var(--green); }
-.stat-card.blue::before { background: var(--blue); }
-.stat-card.red::before { background: var(--red); }
-.stat-card.purple::before { background: var(--purple); }
-.stat-card.yellow::before { background: var(--yellow); }
-.stat-card .label { font-size: 11.5px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.8px; font-weight: 500; }
-.stat-card .value { font-size: 26px; font-weight: 700; font-family: var(--mono); margin-top: 6px; letter-spacing: -1px; }
-.stat-card .sub { font-size: 12px; color: var(--text2); margin-top: 4px; }
-
-/* Tables */
-.table-wrap {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); overflow: hidden;
-}
-.table-toolbar {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 18px; border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap;
-}
-.search-box {
-  display: flex; align-items: center; gap: 8px; background: var(--surface2);
-  border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; flex: 1; max-width: 320px;
-}
-.search-box input {
-  border: none; background: transparent; color: var(--text); font-size: 13px;
-  outline: none; width: 100%;
-}
-.search-box input::placeholder { color: var(--text3); }
-table { width: 100%; border-collapse: collapse; }
-th {
-  text-align: left; padding: 10px 18px; font-size: 11px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.8px; color: var(--text3);
-  background: var(--surface2); border-bottom: 1px solid var(--border);
-}
-td {
-  padding: 12px 18px; font-size: 13.5px; border-bottom: 1px solid var(--border);
-  vertical-align: middle;
-}
-tr:last-child td { border-bottom: none; }
-tr:hover td { background: rgba(255,255,255,0.015); }
-
-/* Badges */
-.badge-pill {
-  display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px;
-  border-radius: 20px; font-size: 11.5px; font-weight: 600;
-}
-.badge-green { background: var(--green-bg); color: var(--green); }
-.badge-red { background: var(--red-bg); color: var(--red); }
-.badge-blue { background: var(--blue-bg); color: var(--blue); }
-.badge-yellow { background: var(--yellow-bg); color: var(--yellow); }
-.badge-orange { background: var(--accent-bg); color: var(--accent); }
-.badge-purple { background: var(--purple-bg); color: var(--purple); }
-.badge-gray { background: var(--surface2); color: var(--text2); }
-
-/* Buttons */
-.btn {
-  display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px;
-  border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
-  border: 1px solid transparent; transition: all 0.15s; white-space: nowrap;
-}
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover { background: var(--accent2); }
-.btn-secondary { background: var(--surface2); color: var(--text); border-color: var(--border); }
-.btn-secondary:hover { border-color: var(--text3); }
-.btn-danger { background: var(--red-bg); color: var(--red); border-color: rgba(239,68,68,0.2); }
-.btn-danger:hover { background: var(--red); color: #fff; }
-.btn-sm { padding: 5px 10px; font-size: 12px; }
-.btn-icon {
-  width: 32px; height: 32px; padding: 0; display: grid; place-items: center;
-  border-radius: 8px; border: 1px solid var(--border); background: transparent;
-  color: var(--text2); cursor: pointer; transition: all 0.15s;
-}
-.btn-icon:hover { border-color: var(--text3); color: var(--text); }
-
-/* Modal */
-.modal-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
-  z-index: 200; display: grid; place-items: center; padding: 20px;
-}
-.modal {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
-  width: 100%; max-width: 540px; max-height: 85vh; overflow-y: auto;
-  box-shadow: var(--shadow);
-}
-.modal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 18px 22px; border-bottom: 1px solid var(--border);
-}
-.modal-header h3 { font-size: 16px; font-weight: 600; }
-.modal-body { padding: 22px; }
-.modal-footer {
-  display: flex; justify-content: flex-end; gap: 10px;
-  padding: 16px 22px; border-top: 1px solid var(--border);
-}
-
-/* Forms */
-.form-group { margin-bottom: 16px; }
-.form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
-.form-group input, .form-group select, .form-group textarea {
-  width: 100%; padding: 9px 13px; background: var(--surface2);
-  border: 1px solid var(--border); border-radius: 8px; color: var(--text);
-  font-size: 13.5px; outline: none; transition: border-color 0.15s;
-}
-.form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--accent); }
-.form-group select { appearance: none; cursor: pointer; }
-.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-
-/* Detail panels */
-.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-.detail-section {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 20px;
-}
-.detail-section h4 {
-  font-size: 13px; font-weight: 600; color: var(--text2);
-  text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 14px;
-  padding-bottom: 10px; border-bottom: 1px solid var(--border);
-}
-.detail-row { display: flex; justify-content: space-between; padding: 7px 0; font-size: 13.5px; }
-.detail-row .dl { color: var(--text3); }
-.detail-row .dv { font-weight: 500; }
-
-/* Charts */
-.chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 24px; }
-.chart-card {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 20px;
-}
-.chart-card h4 { font-size: 13px; font-weight: 600; color: var(--text2); margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.6px; }
-
-/* Alerts list */
-.alert-item {
-  display: flex; align-items: center; gap: 14px; padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-}
-.alert-item:last-child { border-bottom: none; }
-.alert-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.alert-dot.red { background: var(--red); }
-.alert-dot.yellow { background: var(--yellow); }
-.alert-dot.orange { background: var(--accent); }
-.alert-info { flex: 1; }
-.alert-info .alert-msg { font-size: 13.5px; }
-.alert-info .alert-meta { font-size: 11.5px; color: var(--text3); margin-top: 2px; }
-
-/* Tabs */
-.tabs { display: flex; gap: 4px; margin-bottom: 20px; background: var(--surface); padding: 4px; border-radius: 10px; border: 1px solid var(--border); width: fit-content; }
-.tab-btn {
-  padding: 7px 16px; border-radius: 7px; border: none; background: transparent;
-  color: var(--text2); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s;
-}
-.tab-btn.active { background: var(--accent); color: #fff; }
-
-/* Login */
-.login-page {
-  min-height: 100vh; display: grid; place-items: center;
-  background: var(--bg);
-  background-image: radial-gradient(ellipse at 30% 20%, rgba(249,115,22,0.08) 0%, transparent 60%),
-                    radial-gradient(ellipse at 70% 80%, rgba(59,130,246,0.05) 0%, transparent 60%);
-}
-.login-card {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: 16px; padding: 40px; width: 100%; max-width: 400px;
-  box-shadow: var(--shadow);
-}
-.login-card .logo-big {
-  width: 56px; height: 56px; background: var(--accent); border-radius: 14px;
-  display: grid; place-items: center; font-family: var(--mono); font-weight: 700;
-  font-size: 18px; color: #fff; margin: 0 auto 20px;
-}
-.login-card h2 { text-align: center; font-size: 22px; margin-bottom: 4px; }
-.login-card .sub { text-align: center; color: var(--text2); font-size: 14px; margin-bottom: 28px; }
-.login-card .err { background: var(--red-bg); color: var(--red); padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
-
-/* Empty state */
-.empty { text-align: center; padding: 48px 20px; color: var(--text3); }
-.empty .empty-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.3; }
-.empty p { font-size: 14px; }
-
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-
-/* Responsive */
-@media (max-width: 900px) {
-  .sidebar { display: none; }
-  .main { margin-left: 0; }
-  .chart-grid, .detail-grid { grid-template-columns: 1fr; }
-  .stats-grid { grid-template-columns: repeat(2, 1fr); }
-  .form-row { grid-template-columns: 1fr; }
-}
-
-/* Animations */
-@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-.content > * { animation: fadeIn 0.3s ease; }
-.modal { animation: fadeIn 0.2s ease; }
-`;
-
-// ─── Modal Component ───
-function Modal({ title, onClose, children, footer }) {
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>{title}</h3>
-          <button className="btn-icon" onClick={onClose}>{Icons.x}</button>
-        </div>
-        <div className="modal-body">{children}</div>
-        {footer && <div className="modal-footer">{footer}</div>}
-      </div>
-    </div>
-  );
-}
-
-// ─── SVG Charts ───
-function BarChart({ data, width = 420, height = 200, color = "var(--accent)" }) {
-  if (!data?.length) return <div className="empty"><p>No data</p></div>;
-  const max = Math.max(...data.map((d) => d.value), 1);
-  const barW = Math.min(36, (width - 60) / data.length - 6);
-  const chartH = height - 40;
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", maxHeight: height }}>
-      {[0, 0.25, 0.5, 0.75, 1].map((f) => (
-        <g key={f}>
-          <line x1="40" y1={10 + chartH * (1 - f)} x2={width - 10} y2={10 + chartH * (1 - f)} stroke="var(--border)" strokeWidth="1" />
-          <text x="36" y={14 + chartH * (1 - f)} textAnchor="end" fill="var(--text3)" fontSize="10" fontFamily="var(--mono)">{Math.round(max * f)}</text>
-        </g>
-      ))}
-      {data.map((d, i) => {
-        const x = 50 + i * ((width - 60) / data.length);
-        const h = (d.value / max) * chartH;
-        return (
-          <g key={i}>
-            <rect x={x} y={10 + chartH - h} width={barW} height={h} rx="4" fill={d.color || color} opacity="0.85" />
-            <text x={x + barW / 2} y={height - 4} textAnchor="middle" fill="var(--text3)" fontSize="10" fontFamily="var(--mono)">{d.label}</text>
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
-function DonutChart({ data, size = 180 }) {
-  if (!data?.length) return null;
-  const total = data.reduce((s, d) => s + d.value, 0) || 1;
-  const r = 60, cx = size / 2, cy = size / 2, stroke = 22;
-  let cum = 0;
-  const segments = data.map((d) => {
-    const frac = d.value / total;
-    const startAngle = cum * 2 * Math.PI - Math.PI / 2;
-    cum += frac;
-    const endAngle = cum * 2 * Math.PI - Math.PI / 2;
-    const large = frac > 0.5 ? 1 : 0;
-    const x1 = cx + r * Math.cos(startAngle), y1 = cy + r * Math.sin(startAngle);
-    const x2 = cx + r * Math.cos(endAngle), y2 = cy + r * Math.sin(endAngle);
-    return { ...d, path: `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}` };
-  });
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        {segments.map((s, i) => (
-          <path key={i} d={s.path} fill="none" stroke={s.color} strokeWidth={stroke} strokeLinecap="round" />
-        ))}
-        <text x={cx} y={cy - 4} textAnchor="middle" fill="var(--text)" fontSize="20" fontWeight="700" fontFamily="var(--mono)">{total}</text>
-        <text x={cx} y={cy + 14} textAnchor="middle" fill="var(--text3)" fontSize="10">TOTAL</text>
-      </svg>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {data.map((d, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
-            <span style={{ width: 10, height: 10, borderRadius: 3, background: d.color, flexShrink: 0 }} />
-            <span style={{ color: "var(--text2)" }}>{d.label}</span>
-            <span style={{ fontWeight: 600, marginLeft: "auto", fontFamily: "var(--mono)" }}>{d.value}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function SparkLine({ data, width = 200, height = 50, color = "var(--accent)" }) {
-  if (!data?.length) return null;
-  const max = Math.max(...data, 1);
-  const min = Math.min(...data, 0);
-  const range = max - min || 1;
-  const pts = data.map((v, i) => `${(i / (data.length - 1)) * width},${height - 6 - ((v - min) / range) * (height - 12)}`).join(" ");
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", maxHeight: height }}>
-      <defs>
-        <linearGradient id={`sg_${color.replace(/[^a-z]/g, "")}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.3" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <polygon points={`0,${height} ${pts} ${width},${height}`} fill={`url(#sg_${color.replace(/[^a-z]/g, "")})`} />
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-// ─── Standalone Form Components (proper hooks usage) ───
-function RevenueForm({ onSave, onCancel }) {
-  const [f, setF] = useState({ amount: "", type: "other", description: "", date: today(), vehicle_id: "" });
-  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-  return (
-    <>
-      <div className="form-row">
-        <div className="form-group"><label>Amount (MAD)</label><input type="number" value={f.amount} onChange={(e) => set("amount", e.target.value)} /></div>
-        <div className="form-group"><label>Type</label>
-          <select value={f.type} onChange={(e) => set("type", e.target.value)}>
-            <option value="rental">Rental</option><option value="deposit">Deposit</option><option value="penalty">Penalty</option><option value="other">Other</option>
-          </select>
-        </div>
-      </div>
-      <div className="form-group"><label>Date</label><input type="date" value={f.date} onChange={(e) => set("date", e.target.value)} /></div>
-      <div className="form-group"><label>Description</label><input value={f.description} onChange={(e) => set("description", e.target.value)} /></div>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-        <button className="btn btn-secondary" onClick={onCancel}>Cancel</button>
-        <button className="btn btn-primary" onClick={() => onSave(f)}>Save</button>
-      </div>
-    </>
-  );
-}
-
-function ExpenseForm({ onSave, onCancel }) {
-  const [f, setF] = useState({ amount: "", category: "fuel", description: "", date: today(), vehicle_id: "" });
-  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-  return (
-    <>
-      <div className="form-row">
-        <div className="form-group"><label>Amount (MAD)</label><input type="number" value={f.amount} onChange={(e) => set("amount", e.target.value)} /></div>
-        <div className="form-group"><label>Category</label>
-          <select value={f.category} onChange={(e) => set("category", e.target.value)}>
-            <option value="fuel">Fuel</option><option value="maintenance">Maintenance</option><option value="insurance">Insurance</option><option value="rent">Rent</option><option value="salary">Salary</option><option value="other">Other</option>
-          </select>
-        </div>
-      </div>
-      <div className="form-group"><label>Date</label><input type="date" value={f.date} onChange={(e) => set("date", e.target.value)} /></div>
-      <div className="form-group"><label>Description</label><input value={f.description} onChange={(e) => set("description", e.target.value)} /></div>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-        <button className="btn btn-secondary" onClick={onCancel}>Cancel</button>
-        <button className="btn btn-primary" onClick={() => onSave(f)}>Save</button>
-      </div>
-    </>
-  );
-}
-
-function CashForm({ onSave, onCancel }) {
-  const [f, setF] = useState({ amount: "", description: "", date: today() });
-  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-  return (
-    <>
-      <div className="form-group"><label>Amount (MAD)</label><input type="number" value={f.amount} onChange={(e) => set("amount", e.target.value)} /></div>
-      <div className="form-group"><label>Date</label><input type="date" value={f.date} onChange={(e) => set("date", e.target.value)} /></div>
-      <div className="form-group"><label>Description</label><input value={f.description} onChange={(e) => set("description", e.target.value)} /></div>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-        <button className="btn btn-secondary" onClick={onCancel}>Cancel</button>
-        <button className="btn btn-primary" onClick={() => onSave(f)}>Save</button>
-      </div>
-    </>
-  );
-}
-
-// ─── LOGIN ───
-function LoginPage({ onLogin }) {
-  const [email, setEmail] = useState("");
-  const [pass, setPass] = useState("");
-  const [err, setErr] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [mode, setMode] = useState("login");
-
-  const handleSubmit = async () => {
-    setErr(""); setLoading(true);
-    try {
-      const data = mode === "login" ? await supabase.signIn(email, pass) : await supabase.signUp(email, pass);
-      if (data.access_token) onLogin(data);
-      else setErr("Check your email to confirm signup.");
-    } catch (e) { setErr(e.message); }
-    setLoading(false);
-  };
-
-  return (
-    <div className="login-page">
-      <div className="login-card">
-        <div className="logo-big">BB</div>
-        <h2>BB MOTO Tanger</h2>
-        <p className="sub">Fleet Management System</p>
-        {err && <div className="err">{err}</div>}
-        <div className="form-group">
-          <label>Email</label>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@bbmoto.ma" />
-        </div>
-        <div className="form-group">
-          <label>Password</label>
-          <input type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="••••••••" onKeyDown={(e) => e.key === "Enter" && handleSubmit()} />
-        </div>
-        <button className="btn btn-primary" style={{ width: "100%", justifyContent: "center", marginTop: 8, padding: "11px 16px" }} onClick={handleSubmit} disabled={loading}>
-          {loading ? "..." : mode === "login" ? "Sign In" : "Create Account"}
-        </button>
-        <p style={{ textAlign: "center", marginTop: 16, fontSize: 13, color: "var(--text3)" }}>
-          {mode === "login" ? "No account? " : "Have an account? "}
-          <span style={{ color: "var(--accent)", cursor: "pointer" }} onClick={() => setMode(mode === "login" ? "signup" : "login")}>
-            {mode === "login" ? "Sign up" : "Sign in"}
-          </span>
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ─── MAIN APP ───
-export default function App() {
-  const [session, setSession] = useState(null);
-  const [page, setPage] = useState("dashboard");
-  const [vehicles, setVehicles] = useState([]);
-  const [contracts, setContracts] = useState([]);
-  const [revenue, setRevenue] = useState([]);
-  const [expenses, setExpenses] = useState([]);
-  const [cashOps, setCashOps] = useState([]);
-  const [clients, setClients] = useState([]);
-  const [alerts, setAlerts] = useState([]);
-  const [reservations, setReservations] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState(null);
-  const [search, setSearch] = useState("");
-  const [detailVehicle, setDetailVehicle] = useState(null);
-  const [detailClient, setDetailClient] = useState(null);
-  const [contractTab, setContractTab] = useState("active");
-  const [clientTab, setClientTab] = useState("all");
-
-  const token = session?.access_token;
-
-  // ─── Fetch all data ───
-  const fetchAll = useCallback(async () => {
-    if (!token) return;
-    setLoading(true);
-    try {
-      const [v, c, r, e, co, cl, al, res] = await Promise.all([
-        supabase.query("vehicles", { order: "created_at.desc", token }),
-        supabase.query("contracts", { order: "created_at.desc", token }),
-        supabase.query("revenue", { order: "created_at.desc", token }),
-        supabase.query("expenses", { order: "created_at.desc", token }),
-        supabase.query("cash_ops", { order: "created_at.desc", token }),
-        supabase.query("clients", { order: "created_at.desc", token }).catch(() => []),
-        supabase.query("alerts", { order: "created_at.desc", token }).catch(() => []),
-        supabase.query("reservations", { order: "created_at.desc", token }).catch(() => []),
-      ]);
-      setVehicles(v); setContracts(c); setRevenue(r); setExpenses(e);
-      setCashOps(co); setClients(cl); setAlerts(al); setReservations(res);
-    } catch (err) { console.error("Fetch error:", err); }
-    setLoading(false);
-  }, [token]);
-
-  useEffect(() => { fetchAll(); }, [fetchAll]);
-
-  // ─── Auto-create revenue on contract creation ───
-  const createContractWithRevenue = async (contractData) => {
-    const days = daysBetween(contractData.start_date, contractData.end_date);
-    const totalAmount = days * (contractData.daily_rate || 0);
-    const [newContract] = await supabase.insert("contracts", { ...contractData, total_amount: totalAmount, status: "active" }, token);
-    await supabase.insert("revenue", {
-      contract_id: newContract.id,
-      amount: totalAmount,
-      type: "rental",
-      description: `Rental: ${contractData.client_name || "Client"} — ${days}d × ${fmt(contractData.daily_rate)}`,
-      date: contractData.start_date,
-      vehicle_id: contractData.vehicle_id,
-    }, token);
-    if (contractData.vehicle_id) {
-      await supabase.update("vehicles", { status: "rented" }, `id=eq.${contractData.vehicle_id}`, token);
-    }
-    fetchAll();
-  };
-
-  // ─── Generate alerts ───
-  const computedAlerts = useMemo(() => {
-    const a = [];
-    vehicles.forEach((v) => {
-      const insExp = daysFromNow(v.insurance_expiry);
-      if (insExp !== null && insExp <= 30) {
-        a.push({ type: insExp <= 0 ? "red" : insExp <= 7 ? "orange" : "yellow", msg: `${v.brand} ${v.model} — Insurance ${insExp <= 0 ? "EXPIRED" : `expires in ${insExp}d`}`, vehicle: v.id, date: v.insurance_expiry });
-      }
-      if (v.mileage && v.mileage > 20000) {
-        a.push({ type: "yellow", msg: `${v.brand} ${v.model} — High mileage: ${v.mileage?.toLocaleString()} km`, vehicle: v.id });
-      }
-    });
-    contracts.forEach((c) => {
-      if (c.status === "active" && new Date(c.end_date) < new Date()) {
-        a.push({ type: "red", msg: `Overdue contract: ${c.client_name || "Client"} — ended ${fmtDate(c.end_date)}`, contract: c.id });
-      }
-    });
-    return a;
-  }, [vehicles, contracts]);
-
-  const allAlerts = [...computedAlerts, ...alerts.map((a) => ({ type: a.severity || "yellow", msg: a.message, date: a.created_at }))];
-
-  if (!session) return (<><style>{css}</style><LoginPage onLogin={setSession} /></>);
-
-  // ─── NAV ITEMS ───
-  const navItems = [
-    { id: "dashboard", label: "Dashboard", icon: Icons.dashboard },
-    { id: "vehicles", label: "Fleet", icon: Icons.scooter, count: vehicles.length },
-    { id: "contracts", label: "Contracts", icon: Icons.contract, count: contracts.filter((c) => c.status === "active").length },
-    { id: "clients", label: "Clients", icon: Icons.clients, count: clients.length },
-    { id: "revenue", label: "Revenue", icon: Icons.money },
-    { id: "expenses", label: "Expenses", icon: Icons.expense },
-    { id: "cash", label: "Cash Tracking", icon: Icons.cash },
-    { id: "alerts", label: "Alerts", icon: Icons.alert, badge: allAlerts.filter((a) => a.type === "red").length || null },
-  ];
-
-  // ─── DASHBOARD ───
-  const renderDashboard = () => {
-    const totalRevenue = revenue.reduce((s, r) => s + (r.amount || 0), 0);
-    const totalExpenses = expenses.reduce((s, e) => s + (e.amount || 0), 0);
-    const activeContracts = contracts.filter((c) => c.status === "active").length;
-    const availableVehicles = vehicles.filter((v) => v.status === "available").length;
-    const totalCashIn = cashOps.filter((c) => c.type === "in").reduce((s, c) => s + (c.amount || 0), 0);
-    const totalCashOut = cashOps.filter((c) => c.type === "out").reduce((s, c) => s + (c.amount || 0), 0);
-
-    // Monthly revenue data
-    const monthlyRev = {};
-    revenue.forEach((r) => {
-      const m = (r.date || r.created_at || "").slice(0, 7);
-      if (m) monthlyRev[m] = (monthlyRev[m] || 0) + (r.amount || 0);
-    });
-    const monthLabels = Object.keys(monthlyRev).sort().slice(-6);
-    const barData = monthLabels.map((m) => ({ label: m.slice(5), value: monthlyRev[m] }));
-
-    // Vehicle status donut
-    const statusCounts = { available: 0, rented: 0, maintenance: 0 };
-    vehicles.forEach((v) => { statusCounts[v.status] = (statusCounts[v.status] || 0) + 1; });
-    const donutData = [
-      { label: "Available", value: statusCounts.available, color: "var(--green)" },
-      { label: "Rented", value: statusCounts.rented, color: "var(--accent)" },
-      { label: "Maintenance", value: statusCounts.maintenance, color: "var(--yellow)" },
-    ];
-
-    // Daily revenue spark
-    const dailyRev = {};
-    revenue.slice(0, 30).forEach((r) => {
-      const d = (r.date || r.created_at || "").slice(0, 10);
-      if (d) dailyRev[d] = (dailyRev[d] || 0) + (r.amount || 0);
-    });
-    const sparkData = Object.keys(dailyRev).sort().map((k) => dailyRev[k]);
-
-    return (
-      <>
-        <div className="stats-grid">
-          <div className="stat-card orange"><div className="label">Total Revenue</div><div className="value">{fmt(totalRevenue)}</div><SparkLine data={sparkData} color="var(--accent)" /></div>
-          <div className="stat-card red"><div className="label">Total Expenses</div><div className="value">{fmt(totalExpenses)}</div><div className="sub">Net: {fmt(totalRevenue - totalExpenses)}</div></div>
-          <div className="stat-card green"><div className="label">Active Contracts</div><div className="value">{activeContracts}</div><div className="sub">{contracts.length} total</div></div>
-          <div className="stat-card blue"><div className="label">Available Vehicles</div><div className="value">{availableVehicles}</div><div className="sub">of {vehicles.length} total</div></div>
-          <div className="stat-card purple"><div className="label">Clients</div><div className="value">{clients.length}</div><div className="sub">{clients.filter((c) => c.is_blacklisted).length} blacklisted</div></div>
-          <div className="stat-card yellow"><div className="label">Cash Balance</div><div className="value">{fmt(totalCashIn - totalCashOut)}</div><div className="sub">In: {fmt(totalCashIn)} / Out: {fmt(totalCashOut)}</div></div>
-        </div>
-        <div className="chart-grid">
-          <div className="chart-card">
-            <h4>Monthly Revenue</h4>
-            <BarChart data={barData} />
-          </div>
-          <div className="chart-card">
-            <h4>Fleet Status</h4>
-            <DonutChart data={donutData} />
-          </div>
-        </div>
-        {allAlerts.length > 0 && (
-          <div className="table-wrap" style={{ marginBottom: 24 }}>
-            <div className="table-toolbar"><h4 style={{ fontSize: 13, fontWeight: 600, color: "var(--text2)", textTransform: "uppercase", letterSpacing: "0.6px" }}>Recent Alerts</h4></div>
-            {allAlerts.slice(0, 5).map((a, i) => (
-              <div className="alert-item" key={i}>
-                <div className={`alert-dot ${a.type}`} />
-                <div className="alert-info">
-                  <div className="alert-msg">{a.msg}</div>
-                  {a.date && <div className="alert-meta">{fmtDate(a.date)}</div>}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </>
-    );
-  };
-
-  // ─── VEHICLES ───
-  const VehicleForm = ({ initial, onSave }) => {
-    const [f, setF] = useState(initial || { brand: "", model: "", plate: "", status: "available", daily_rate: "", year: "", fuel_type: "petrol", color: "", mileage: "", insurance_expiry: "" });
-    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-    return (
-      <>
-        <div className="form-row">
-          <div className="form-group"><label>Brand</label><input value={f.brand} onChange={(e) => set("brand", e.target.value)} placeholder="Honda" /></div>
-          <div className="form-group"><label>Model</label><input value={f.model} onChange={(e) => set("model", e.target.value)} placeholder="PCX 125" /></div>
-        </div>
-        <div className="form-row">
-          <div className="form-group"><label>Plate</label><input value={f.plate} onChange={(e) => set("plate", e.target.value)} placeholder="12345-A-1" /></div>
-          <div className="form-group"><label>Daily Rate (MAD)</label><input type="number" value={f.daily_rate} onChange={(e) => set("daily_rate", e.target.value)} /></div>
-        </div>
-        <div className="form-row">
-          <div className="form-group"><label>Year</label><input type="number" value={f.year || ""} onChange={(e) => set("year", e.target.value)} placeholder="2023" /></div>
-          <div className="form-group"><label>Fuel Type</label>
-            <select value={f.fuel_type || "petrol"} onChange={(e) => set("fuel_type", e.target.value)}>
-              <option value="petrol">Petrol</option><option value="electric">Electric</option><option value="hybrid">Hybrid</option>
-            </select>
-          </div>
-        </div>
-        <div className="form-row">
-          <div className="form-group"><label>Color</label><input value={f.color || ""} onChange={(e) => set("color", e.target.value)} placeholder="Red" /></div>
-          <div className="form-group"><label>Mileage (km)</label><input type="number" value={f.mileage || ""} onChange={(e) => set("mileage", e.target.value)} /></div>
-        </div>
-        <div className="form-row">
-          <div className="form-group"><label>Insurance Expiry</label><input type="date" value={f.insurance_expiry || ""} onChange={(e) => set("insurance_expiry", e.target.value)} /></div>
-          <div className="form-group"><label>Status</label>
-            <select value={f.status} onChange={(e) => set("status", e.target.value)}>
-              <option value="available">Available</option><option value="rented">Rented</option><option value="maintenance">Maintenance</option>
-            </select>
-          </div>
-        </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8 }}>
-          <button className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
-          <button className="btn btn-primary" onClick={() => onSave(f)}>Save</button>
-        </div>
-      </>
-    );
-  };
-
-  const renderVehicleDetail = (v) => {
-    const vContracts = contracts.filter((c) => c.vehicle_id === v.id);
-    const vRevenue = revenue.filter((r) => r.vehicle_id === v.id);
-    const vAlerts = allAlerts.filter((a) => a.vehicle === v.id);
-    const totalRev = vRevenue.reduce((s, r) => s + (r.amount || 0), 0);
-    const insExp = daysFromNow(v.insurance_expiry);
-
-    return (
-      <div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-          <button className="btn btn-secondary btn-sm" onClick={() => setDetailVehicle(null)}>← Back</button>
-          <h3 style={{ fontSize: 18, fontWeight: 600 }}>{v.brand} {v.model}</h3>
-          <span className={`badge-pill ${v.status === "available" ? "badge-green" : v.status === "rented" ? "badge-orange" : "badge-yellow"}`}>{v.status}</span>
-        </div>
-        <div className="detail-grid">
-          <div className="detail-section">
-            <h4>Vehicle Info</h4>
-            <div className="detail-row"><span className="dl">Plate</span><span className="dv">{v.plate}</span></div>
-            <div className="detail-row"><span className="dl">Year</span><span className="dv">{v.year || "—"}</span></div>
-            <div className="detail-row"><span className="dl">Color</span><span className="dv">{v.color || "—"}</span></div>
-            <div className="detail-row"><span className="dl">Fuel</span><span className="dv">{v.fuel_type || "—"}</span></div>
-            <div className="detail-row"><span className="dl">Mileage</span><span className="dv">{v.mileage ? `${v.mileage.toLocaleString()} km` : "—"}</span></div>
-            <div className="detail-row"><span className="dl">Daily Rate</span><span className="dv">{fmt(v.daily_rate)}</span></div>
-            <div className="detail-row"><span className="dl">Insurance Expiry</span><span className="dv" style={{ color: insExp !== null && insExp <= 7 ? "var(--red)" : "inherit" }}>{fmtDate(v.insurance_expiry)}{insExp !== null ? ` (${insExp}d)` : ""}</span></div>
-          </div>
-          <div className="detail-section">
-            <h4>Performance</h4>
-            <div className="detail-row"><span className="dl">Total Revenue</span><span className="dv" style={{ color: "var(--green)" }}>{fmt(totalRev)}</span></div>
-            <div className="detail-row"><span className="dl">Total Contracts</span><span className="dv">{vContracts.length}</span></div>
-            <div className="detail-row"><span className="dl">Active Contracts</span><span className="dv">{vContracts.filter((c) => c.status === "active").length}</span></div>
-            {vAlerts.length > 0 && (
-              <>
-                <h4 style={{ marginTop: 16 }}>Alerts</h4>
-                {vAlerts.map((a, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0" }}>
-                    <div className={`alert-dot ${a.type}`} />
-                    <span style={{ fontSize: 13 }}>{a.msg}</span>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        </div>
-        {vContracts.length > 0 && (
-          <div className="table-wrap" style={{ marginTop: 20 }}>
-            <div className="table-toolbar"><h4 style={{ fontSize: 13, fontWeight: 600, color: "var(--text2)" }}>CONTRACT HISTORY</h4></div>
-            <table>
-              <thead><tr><th>Client</th><th>Period</th><th>Amount</th><th>Status</th></tr></thead>
-              <tbody>
-                {vContracts.map((c) => (
-                  <tr key={c.id}>
-                    <td>{c.client_name || "—"}</td>
-                    <td>{fmtDateShort(c.start_date)} → {fmtDateShort(c.end_date)}</td>
-                    <td style={{ fontFamily: "var(--mono)" }}>{fmt(c.total_amount)}</td>
-                    <td><span className={`badge-pill ${c.status === "active" ? "badge-green" : c.status === "completed" ? "badge-blue" : "badge-gray"}`}>{c.status}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderVehicles = () => {
-    if (detailVehicle) return renderVehicleDetail(detailVehicle);
-    const filtered = vehicles.filter((v) =>
-      `${v.brand} ${v.model} ${v.plate}`.toLowerCase().includes(search.toLowerCase())
-    );
-    return (
-      <div className="table-wrap">
-        <div className="table-toolbar">
-          <div className="search-box">{Icons.search}<input placeholder="Search fleet..." value={search} onChange={(e) => setSearch(e.target.value)} /></div>
-          <button className="btn btn-primary" onClick={() => setModal("addVehicle")}>{Icons.plus} Add Vehicle</button>
-        </div>
-        <table>
-          <thead><tr><th>Vehicle</th><th>Plate</th><th>Year</th><th>Rate/Day</th><th>Mileage</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody>
-            {filtered.map((v) => (
-              <tr key={v.id} style={{ cursor: "pointer" }} onClick={() => setDetailVehicle(v)}>
-                <td style={{ fontWeight: 600 }}>{v.brand} {v.model}</td>
-                <td style={{ fontFamily: "var(--mono)", fontSize: 12.5 }}>{v.plate}</td>
-                <td>{v.year || "—"}</td>
-                <td style={{ fontFamily: "var(--mono)" }}>{fmt(v.daily_rate)}</td>
-                <td>{v.mileage ? `${v.mileage.toLocaleString()} km` : "—"}</td>
-                <td><span className={`badge-pill ${v.status === "available" ? "badge-green" : v.status === "rented" ? "badge-orange" : "badge-yellow"}`}>{v.status}</span></td>
-                <td onClick={(e) => e.stopPropagation()}>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button className="btn-icon" onClick={() => setModal({ type: "editVehicle", data: v })}>{Icons.edit}</button>
-                    <button className="btn-icon" style={{ borderColor: "rgba(239,68,68,0.3)", color: "var(--red)" }} onClick={async () => { if (confirm("Delete this vehicle?")) { await supabase.remove("vehicles", `id=eq.${v.id}`, token); fetchAll(); } }}>{Icons.trash}</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {filtered.length === 0 && <div className="empty"><p>No vehicles found</p></div>}
-      </div>
-    );
-  };
-
-  // ─── CONTRACTS ───
-  const ContractForm = ({ initial, onSave }) => {
-    const [f, setF] = useState(initial || { client_name: "", vehicle_id: "", start_date: today(), end_date: "", daily_rate: "", deposit: "", notes: "", client_id: "" });
-    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-    const avail = vehicles.filter((v) => v.status === "available" || v.id === initial?.vehicle_id);
-    const selectedV = vehicles.find((v) => v.id === f.vehicle_id);
-
-    useEffect(() => {
-      if (selectedV && !initial) set("daily_rate", selectedV.daily_rate || "");
-    }, [f.vehicle_id]);
-
-    return (
-      <>
-        <div className="form-row">
-          <div className="form-group"><label>Client Name</label><input value={f.client_name} onChange={(e) => set("client_name", e.target.value)} placeholder="Full name" /></div>
-          <div className="form-group"><label>Client (linked)</label>
-            <select value={f.client_id || ""} onChange={(e) => { set("client_id", e.target.value); const cl = clients.find((c) => c.id === e.target.value); if (cl) set("client_name", cl.full_name); }}>
-              <option value="">— Select client —</option>
-              {clients.filter((c) => !c.is_blacklisted).map((c) => <option key={c.id} value={c.id}>{c.full_name}</option>)}
-            </select>
-          </div>
-        </div>
-        <div className="form-group"><label>Vehicle</label>
-          <select value={f.vehicle_id} onChange={(e) => set("vehicle_id", e.target.value)}>
-            <option value="">— Select —</option>
-            {avail.map((v) => <option key={v.id} value={v.id}>{v.brand} {v.model} — {v.plate}</option>)}
-          </select>
-        </div>
-        <div className="form-row">
-          <div className="form-group"><label>Start Date</label><input type="date" value={f.start_date} onChange={(e) => set("start_date", e.target.value)} /></div>
-          <div className="form-group"><label>End Date</label><input type="date" value={f.end_date} onChange={(e) => set("end_date", e.target.value)} /></div>
-        </div>
-        <div className="form-row">
-          <div className="form-group"><label>Daily Rate (MAD)</label><input type="number" value={f.daily_rate} onChange={(e) => set("daily_rate", e.target.value)} /></div>
-          <div className="form-group"><label>Deposit (MAD)</label><input type="number" value={f.deposit || ""} onChange={(e) => set("deposit", e.target.value)} /></div>
-        </div>
-        {f.start_date && f.end_date && f.daily_rate && (
-          <div style={{ background: "var(--accent-bg)", border: "1px solid rgba(249,115,22,0.2)", borderRadius: 8, padding: "10px 14px", marginBottom: 16, display: "flex", justifyContent: "space-between", fontSize: 14 }}>
-            <span style={{ color: "var(--text2)" }}>{daysBetween(f.start_date, f.end_date)} days × {fmt(f.daily_rate)}</span>
-            <span style={{ fontWeight: 700, color: "var(--accent)", fontFamily: "var(--mono)" }}>{fmt(daysBetween(f.start_date, f.end_date) * f.daily_rate)}</span>
-          </div>
-        )}
-        <div className="form-group"><label>Notes</label><textarea rows={2} value={f.notes || ""} onChange={(e) => set("notes", e.target.value)} /></div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8 }}>
-          <button className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
-          <button className="btn btn-primary" onClick={() => onSave(f)}>Save & Create Revenue</button>
-        </div>
-      </>
-    );
-  };
-
-  const renderContracts = () => {
-    const filtered = contracts
-      .filter((c) => contractTab === "all" || c.status === contractTab)
-      .filter((c) => `${c.client_name}`.toLowerCase().includes(search.toLowerCase()));
-    return (
-      <>
-        <div className="tabs">
-          {["active", "completed", "cancelled", "all"].map((t) => (
-            <button key={t} className={`tab-btn ${contractTab === t ? "active" : ""}`} onClick={() => setContractTab(t)}>{t[0].toUpperCase() + t.slice(1)}</button>
-          ))}
-        </div>
-        <div className="table-wrap">
-          <div className="table-toolbar">
-            <div className="search-box">{Icons.search}<input placeholder="Search contracts..." value={search} onChange={(e) => setSearch(e.target.value)} /></div>
-            <button className="btn btn-primary" onClick={() => setModal("addContract")}>{Icons.plus} New Contract</button>
-          </div>
-          <table>
-            <thead><tr><th>Client</th><th>Vehicle</th><th>Period</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody>
-              {filtered.map((c) => {
-                const v = vehicles.find((v) => v.id === c.vehicle_id);
-                return (
-                  <tr key={c.id}>
-                    <td style={{ fontWeight: 500 }}>{c.client_name || "—"}</td>
-                    <td>{v ? `${v.brand} ${v.model}` : "—"}</td>
-                    <td style={{ fontSize: 12.5 }}>{fmtDateShort(c.start_date)} → {fmtDateShort(c.end_date)}</td>
-                    <td style={{ fontFamily: "var(--mono)", fontWeight: 600 }}>{fmt(c.total_amount)}</td>
-                    <td><span className={`badge-pill ${c.status === "active" ? "badge-green" : c.status === "completed" ? "badge-blue" : "badge-gray"}`}>{c.status}</span></td>
-                    <td>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        {c.status === "active" && (
-                          <button className="btn btn-sm btn-secondary" onClick={async () => {
-                            await supabase.update("contracts", { status: "completed" }, `id=eq.${c.id}`, token);
-                            if (c.vehicle_id) await supabase.update("vehicles", { status: "available" }, `id=eq.${c.vehicle_id}`, token);
-                            fetchAll();
-                          }}>Complete</button>
-                        )}
-                        <button className="btn-icon" style={{ borderColor: "rgba(239,68,68,0.3)", color: "var(--red)" }} onClick={async () => {
-                          if (confirm("Cancel this contract?")) {
-                            await supabase.update("contracts", { status: "cancelled" }, `id=eq.${c.id}`, token);
-                            if (c.vehicle_id) await supabase.update("vehicles", { status: "available" }, `id=eq.${c.vehicle_id}`, token);
-                            fetchAll();
-                          }
-                        }}>{Icons.x}</button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {filtered.length === 0 && <div className="empty"><p>No contracts found</p></div>}
-        </div>
-      </>
-    );
-  };
-
-  // ─── CLIENTS ───
-  const ClientForm = ({ initial, onSave }) => {
-    const [f, setF] = useState(initial || { full_name: "", phone: "", email: "", id_number: "", address: "", notes: "", is_blacklisted: false, blacklist_reason: "" });
-    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-    return (
-      <>
-        <div className="form-row">
-          <div className="form-group"><label>Full Name</label><input value={f.full_name} onChange={(e) => set("full_name", e.target.value)} placeholder="Mohammed El Alami" /></div>
-          <div className="form-group"><label>Phone</label><input value={f.phone || ""} onChange={(e) => set("phone", e.target.value)} placeholder="+212 6XX XXX XXX" /></div>
-        </div>
-        <div className="form-row">
-          <div className="form-group"><label>Email</label><input value={f.email || ""} onChange={(e) => set("email", e.target.value)} placeholder="email@example.com" /></div>
-          <div className="form-group"><label>ID Number (CIN)</label><input value={f.id_number || ""} onChange={(e) => set("id_number", e.target.value)} placeholder="AB123456" /></div>
-        </div>
-        <div className="form-group"><label>Address</label><input value={f.address || ""} onChange={(e) => set("address", e.target.value)} placeholder="Tanger, Morocco" /></div>
-        <div className="form-group"><label>Notes</label><textarea rows={2} value={f.notes || ""} onChange={(e) => set("notes", e.target.value)} /></div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
-            <input type="checkbox" checked={f.is_blacklisted} onChange={(e) => set("is_blacklisted", e.target.checked)} />
-            <span style={{ color: f.is_blacklisted ? "var(--red)" : "var(--text2)" }}>Blacklisted</span>
-          </label>
-        </div>
-        {f.is_blacklisted && (
-          <div className="form-group"><label>Blacklist Reason</label><textarea rows={2} value={f.blacklist_reason || ""} onChange={(e) => set("blacklist_reason", e.target.value)} placeholder="Reason for blacklisting..." /></div>
-        )}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8 }}>
-          <button className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
-          <button className="btn btn-primary" onClick={() => onSave(f)}>Save Client</button>
-        </div>
-      </>
-    );
-  };
-
-  const renderClientDetail = (cl) => {
-    const clContracts = contracts.filter((c) => c.client_id === cl.id || (c.client_name && c.client_name === cl.full_name));
-    const totalSpent = clContracts.reduce((s, c) => s + (c.total_amount || 0), 0);
-    return (
-      <div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-          <button className="btn btn-secondary btn-sm" onClick={() => setDetailClient(null)}>← Back</button>
-          <h3 style={{ fontSize: 18, fontWeight: 600 }}>{cl.full_name}</h3>
-          {cl.is_blacklisted && <span className="badge-pill badge-red">{Icons.ban} Blacklisted</span>}
-        </div>
-        <div className="detail-grid">
-          <div className="detail-section">
-            <h4>Client Info</h4>
-            <div className="detail-row"><span className="dl">Phone</span><span className="dv">{cl.phone || "—"}</span></div>
-            <div className="detail-row"><span className="dl">Email</span><span className="dv">{cl.email || "—"}</span></div>
-            <div className="detail-row"><span className="dl">ID (CIN)</span><span className="dv">{cl.id_number || "—"}</span></div>
-            <div className="detail-row"><span className="dl">Address</span><span className="dv">{cl.address || "—"}</span></div>
-            {cl.is_blacklisted && <div className="detail-row"><span className="dl">Blacklist Reason</span><span className="dv" style={{ color: "var(--red)" }}>{cl.blacklist_reason || "—"}</span></div>}
-          </div>
-          <div className="detail-section">
-            <h4>Rental History</h4>
-            <div className="detail-row"><span className="dl">Total Contracts</span><span className="dv">{clContracts.length}</span></div>
-            <div className="detail-row"><span className="dl">Total Spent</span><span className="dv" style={{ color: "var(--green)", fontFamily: "var(--mono)" }}>{fmt(totalSpent)}</span></div>
-            <div className="detail-row"><span className="dl">Active</span><span className="dv">{clContracts.filter((c) => c.status === "active").length}</span></div>
-            <div className="detail-row"><span className="dl">Member Since</span><span className="dv">{fmtDate(cl.created_at)}</span></div>
-          </div>
-        </div>
-        {clContracts.length > 0 && (
-          <div className="table-wrap" style={{ marginTop: 20 }}>
-            <div className="table-toolbar"><h4 style={{ fontSize: 13, fontWeight: 600, color: "var(--text2)" }}>CONTRACT HISTORY</h4></div>
-            <table>
-              <thead><tr><th>Vehicle</th><th>Period</th><th>Amount</th><th>Status</th></tr></thead>
-              <tbody>
-                {clContracts.map((c) => {
-                  const v = vehicles.find((v) => v.id === c.vehicle_id);
-                  return (
-                    <tr key={c.id}>
-                      <td>{v ? `${v.brand} ${v.model}` : "—"}</td>
-                      <td>{fmtDateShort(c.start_date)} → {fmtDateShort(c.end_date)}</td>
-                      <td style={{ fontFamily: "var(--mono)" }}>{fmt(c.total_amount)}</td>
-                      <td><span className={`badge-pill ${c.status === "active" ? "badge-green" : c.status === "completed" ? "badge-blue" : "badge-gray"}`}>{c.status}</span></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderClients = () => {
-    if (detailClient) return renderClientDetail(detailClient);
-    const filtered = clients
-      .filter((c) => clientTab === "all" || (clientTab === "blacklisted" ? c.is_blacklisted : !c.is_blacklisted))
-      .filter((c) => `${c.full_name} ${c.phone} ${c.id_number}`.toLowerCase().includes(search.toLowerCase()));
-    return (
-      <>
-        <div className="tabs">
-          <button className={`tab-btn ${clientTab === "all" ? "active" : ""}`} onClick={() => setClientTab("all")}>All ({clients.length})</button>
-          <button className={`tab-btn ${clientTab === "active" ? "active" : ""}`} onClick={() => setClientTab("active")}>Active ({clients.filter((c) => !c.is_blacklisted).length})</button>
-          <button className={`tab-btn ${clientTab === "blacklisted" ? "active" : ""}`} onClick={() => setClientTab("blacklisted")}>Blacklisted ({clients.filter((c) => c.is_blacklisted).length})</button>
-        </div>
-        <div className="table-wrap">
-          <div className="table-toolbar">
-            <div className="search-box">{Icons.search}<input placeholder="Search clients..." value={search} onChange={(e) => setSearch(e.target.value)} /></div>
-            <button className="btn btn-primary" onClick={() => setModal("addClient")}>{Icons.plus} Add Client</button>
-          </div>
-          <table>
-            <thead><tr><th>Name</th><th>Phone</th><th>CIN</th><th>Contracts</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody>
-              {filtered.map((c) => {
-                const cCount = contracts.filter((ct) => ct.client_id === c.id || ct.client_name === c.full_name).length;
-                return (
-                  <tr key={c.id} style={{ cursor: "pointer" }} onClick={() => setDetailClient(c)}>
-                    <td style={{ fontWeight: 600 }}>{c.full_name}</td>
-                    <td style={{ fontFamily: "var(--mono)", fontSize: 12.5 }}>{c.phone || "—"}</td>
-                    <td>{c.id_number || "—"}</td>
-                    <td>{cCount}</td>
-                    <td>
-                      {c.is_blacklisted
-                        ? <span className="badge-pill badge-red">{Icons.ban} Blacklisted</span>
-                        : <span className="badge-pill badge-green">Active</span>
-                      }
-                    </td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button className="btn-icon" onClick={() => setModal({ type: "editClient", data: c })}>{Icons.edit}</button>
-                        {!c.is_blacklisted ? (
-                          <button className="btn-icon" style={{ borderColor: "rgba(239,68,68,0.3)", color: "var(--red)" }} title="Blacklist" onClick={() => setModal({ type: "blacklistClient", data: c })}>{Icons.ban}</button>
-                        ) : (
-                          <button className="btn-icon" style={{ borderColor: "rgba(34,197,94,0.3)", color: "var(--green)" }} title="Unblacklist" onClick={async () => { await supabase.update("clients", { is_blacklisted: false, blacklist_reason: "" }, `id=eq.${c.id}`, token); fetchAll(); }}>{Icons.check}</button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {filtered.length === 0 && <div className="empty"><p>No clients found</p></div>}
-        </div>
-      </>
-    );
-  };
-
-  // ─── REVENUE ───
-  const renderRevenue = () => {
-    const filtered = revenue.filter((r) =>
-      `${r.description} ${r.type}`.toLowerCase().includes(search.toLowerCase())
-    );
-    const total = filtered.reduce((s, r) => s + (r.amount || 0), 0);
-    return (
-      <>
-        <div className="stats-grid">
-          <div className="stat-card green"><div className="label">Total Revenue</div><div className="value">{fmt(total)}</div></div>
-          <div className="stat-card blue"><div className="label">Rental Income</div><div className="value">{fmt(filtered.filter((r) => r.type === "rental").reduce((s, r) => s + (r.amount || 0), 0))}</div></div>
-          <div className="stat-card orange"><div className="label">Entries</div><div className="value">{filtered.length}</div></div>
-        </div>
-        <div className="table-wrap">
-          <div className="table-toolbar">
-            <div className="search-box">{Icons.search}<input placeholder="Search revenue..." value={search} onChange={(e) => setSearch(e.target.value)} /></div>
-            <button className="btn btn-primary" onClick={() => setModal("addRevenue")}>{Icons.plus} Add Revenue</button>
-          </div>
-          <table>
-            <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th></tr></thead>
-            <tbody>
-              {filtered.map((r) => (
-                <tr key={r.id}>
-                  <td>{fmtDate(r.date || r.created_at)}</td>
-                  <td><span className={`badge-pill ${r.type === "rental" ? "badge-green" : "badge-blue"}`}>{r.type || "other"}</span></td>
-                  <td>{r.description || "—"}</td>
-                  <td style={{ fontFamily: "var(--mono)", fontWeight: 600, color: "var(--green)" }}>{fmt(r.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {filtered.length === 0 && <div className="empty"><p>No revenue entries</p></div>}
-        </div>
-      </>
-    );
-  };
-
-  // ─── EXPENSES ───
-  const renderExpenses = () => {
-    const filtered = expenses.filter((e) =>
-      `${e.description} ${e.category}`.toLowerCase().includes(search.toLowerCase())
-    );
-    const total = filtered.reduce((s, e) => s + (e.amount || 0), 0);
-    return (
-      <>
-        <div className="stats-grid">
-          <div className="stat-card red"><div className="label">Total Expenses</div><div className="value">{fmt(total)}</div></div>
-          <div className="stat-card orange"><div className="label">Entries</div><div className="value">{filtered.length}</div></div>
-        </div>
-        <div className="table-wrap">
-          <div className="table-toolbar">
-            <div className="search-box">{Icons.search}<input placeholder="Search expenses..." value={search} onChange={(e) => setSearch(e.target.value)} /></div>
-            <button className="btn btn-primary" onClick={() => setModal("addExpense")}>{Icons.plus} Add Expense</button>
-          </div>
-          <table>
-            <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th></tr></thead>
-            <tbody>
-              {filtered.map((e) => (
-                <tr key={e.id}>
-                  <td>{fmtDate(e.date || e.created_at)}</td>
-                  <td><span className="badge-pill badge-orange">{e.category || "other"}</span></td>
-                  <td>{e.description || "—"}</td>
-                  <td style={{ fontFamily: "var(--mono)", fontWeight: 600, color: "var(--red)" }}>{fmt(e.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {filtered.length === 0 && <div className="empty"><p>No expenses found</p></div>}
-        </div>
-      </>
-    );
-  };
-
-  // ─── CASH ───
-  const renderCash = () => {
-    const totalIn = cashOps.filter((c) => c.type === "in").reduce((s, c) => s + (c.amount || 0), 0);
-    const totalOut = cashOps.filter((c) => c.type === "out").reduce((s, c) => s + (c.amount || 0), 0);
-    return (
-      <>
-        <div className="stats-grid">
-          <div className="stat-card green"><div className="label">Cash In</div><div className="value">{fmt(totalIn)}</div></div>
-          <div className="stat-card red"><div className="label">Cash Out</div><div className="value">{fmt(totalOut)}</div></div>
-          <div className="stat-card blue"><div className="label">Balance</div><div className="value">{fmt(totalIn - totalOut)}</div></div>
-        </div>
-        <div className="table-wrap">
-          <div className="table-toolbar">
-            <div className="search-box">{Icons.search}<input placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} /></div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn btn-primary" onClick={() => setModal("cashIn")}>{Icons.plus} Cash In</button>
-              <button className="btn btn-danger" onClick={() => setModal("cashOut")}>{Icons.plus} Cash Out</button>
-            </div>
-          </div>
-          <table>
-            <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th></tr></thead>
-            <tbody>
-              {cashOps.map((c) => (
-                <tr key={c.id}>
-                  <td>{fmtDate(c.date || c.created_at)}</td>
-                  <td><span className={`badge-pill ${c.type === "in" ? "badge-green" : "badge-red"}`}>{c.type === "in" ? "IN" : "OUT"}</span></td>
-                  <td>{c.description || "—"}</td>
-                  <td style={{ fontFamily: "var(--mono)", fontWeight: 600, color: c.type === "in" ? "var(--green)" : "var(--red)" }}>{c.type === "in" ? "+" : "-"}{fmt(c.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {cashOps.length === 0 && <div className="empty"><p>No cash operations</p></div>}
-        </div>
-      </>
-    );
-  };
-
-  // ─── ALERTS ───
-  const renderAlerts = () => (
-    <div className="table-wrap">
-      <div className="table-toolbar"><h4 style={{ fontSize: 13, fontWeight: 600, color: "var(--text2)", textTransform: "uppercase", letterSpacing: "0.6px" }}>All Alerts ({allAlerts.length})</h4></div>
-      {allAlerts.length > 0 ? allAlerts.map((a, i) => (
-        <div className="alert-item" key={i}>
-          <div className={`alert-dot ${a.type}`} />
-          <div className="alert-info">
-            <div className="alert-msg">{a.msg}</div>
-            {a.date && <div className="alert-meta">{fmtDate(a.date)}</div>}
-          </div>
-          <span className={`badge-pill ${a.type === "red" ? "badge-red" : a.type === "orange" ? "badge-orange" : "badge-yellow"}`}>{a.type === "red" ? "Critical" : a.type === "orange" ? "Warning" : "Info"}</span>
-        </div>
-      )) : <div className="empty"><p>No alerts — everything looks good!</p></div>}
-    </div>
-  );
-
-  // ─── Page map ───
-  const pages = { dashboard: renderDashboard, vehicles: renderVehicles, contracts: renderContracts, clients: renderClients, revenue: renderRevenue, expenses: renderExpenses, cash: renderCash, alerts: renderAlerts };
-  const pageTitle = { dashboard: "Dashboard", vehicles: "Fleet Management", contracts: "Contracts", clients: "Client Management", revenue: "Revenue", expenses: "Expenses", cash: "Cash Tracking", alerts: "Alerts" };
-
-  // ─── Modal handlers ───
-  const saveVehicle = async (f) => {
-    const data = { ...f, daily_rate: Number(f.daily_rate) || 0, mileage: f.mileage ? Number(f.mileage) : null, year: f.year ? Number(f.year) : null };
-    await supabase.insert("vehicles", data, token);
-    setModal(null); fetchAll();
-  };
-  const updateVehicle = async (f, id) => {
-    const data = { ...f, daily_rate: Number(f.daily_rate) || 0, mileage: f.mileage ? Number(f.mileage) : null, year: f.year ? Number(f.year) : null };
-    await supabase.update("vehicles", data, `id=eq.${id}`, token);
-    setModal(null); fetchAll();
-  };
-  const saveContract = async (f) => {
-    await createContractWithRevenue({ ...f, daily_rate: Number(f.daily_rate) || 0, deposit: f.deposit ? Number(f.deposit) : null });
-    setModal(null);
-  };
-  const saveClient = async (f) => {
-    await supabase.insert("clients", f, token);
-    setModal(null); fetchAll();
-  };
-  const updateClient = async (f, id) => {
-    await supabase.update("clients", f, `id=eq.${id}`, token);
-    setModal(null); fetchAll();
-  };
-
-  return (
-    <>
-      <style>{css}</style>
-      <div className="app">
-        {/* Sidebar */}
-        <div className="sidebar">
-          <div className="sidebar-brand">
-            <div className="logo">BB</div>
-            <div><h1>BB MOTO</h1><span>Tanger</span></div>
-          </div>
-          <div className="sidebar-nav">
-            {navItems.map((n) => (
-              <div key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => { setPage(n.id); setSearch(""); setDetailVehicle(null); setDetailClient(null); }}>
-                {n.icon}
-                {n.label}
-                {n.badge && <span className="badge">{n.badge}</span>}
-              </div>
-            ))}
-          </div>
-          <div className="sidebar-footer">
-            <button onClick={() => setSession(null)}>{Icons.logout} Sign Out</button>
-          </div>
-        </div>
-
-        {/* Main */}
-        <div className="main">
-          <div className="topbar">
-            <h2>{pageTitle[page]}</h2>
-            <div className="topbar-actions">
-              <span style={{ fontSize: 12, color: "var(--text3)", fontFamily: "var(--mono)" }}>{today()}</span>
-            </div>
-          </div>
-          <div className="content">
-            {loading ? <div className="empty"><p>Loading...</p></div> : (pages[page] || renderDashboard)()}
-          </div>
-        </div>
-      </div>
-
-      {/* Modals */}
-      {modal === "addVehicle" && (
-        <Modal title="Add Vehicle" onClose={() => setModal(null)}>
-          <VehicleForm onSave={saveVehicle} />
-        </Modal>
-      )}
-      {modal?.type === "editVehicle" && (
-        <Modal title="Edit Vehicle" onClose={() => setModal(null)}>
-          <VehicleForm initial={modal.data} onSave={(f) => updateVehicle(f, modal.data.id)} />
-        </Modal>
-      )}
-      {modal === "addContract" && (
-        <Modal title="New Contract" onClose={() => setModal(null)}>
-          <ContractForm onSave={saveContract} />
-        </Modal>
-      )}
-      {modal === "addClient" && (
-        <Modal title="Add Client" onClose={() => setModal(null)}>
-          <ClientForm onSave={saveClient} />
-        </Modal>
-      )}
-      {modal?.type === "editClient" && (
-        <Modal title="Edit Client" onClose={() => setModal(null)}>
-          <ClientForm initial={modal.data} onSave={(f) => updateClient(f, modal.data.id)} />
-        </Modal>
-      )}
-      {modal?.type === "blacklistClient" && (
-        <Modal title="Blacklist Client" onClose={() => setModal(null)}>
-          <div style={{ marginBottom: 16 }}>
-            <p style={{ fontSize: 14, marginBottom: 12 }}>Blacklist <strong>{modal.data.full_name}</strong>?</p>
-            <p style={{ fontSize: 13, color: "var(--text2)" }}>This client will not appear in contract dropdowns.</p>
-          </div>
-          <div className="form-group"><label>Reason</label><textarea rows={3} id="bl-reason" placeholder="Why is this client being blacklisted?" /></div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-            <button className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
-            <button className="btn btn-danger" onClick={async () => {
-              const reason = document.getElementById("bl-reason")?.value || "";
-              await supabase.update("clients", { is_blacklisted: true, blacklist_reason: reason }, `id=eq.${modal.data.id}`, token);
-              setModal(null); fetchAll();
-            }}>Blacklist</button>
-          </div>
-        </Modal>
-      )}
-      {modal === "addRevenue" && (
-        <Modal title="Add Revenue" onClose={() => setModal(null)}>
-          <RevenueForm onSave={async (f) => { await supabase.insert("revenue", { ...f, amount: Number(f.amount) || 0 }, token); setModal(null); fetchAll(); }} onCancel={() => setModal(null)} />
-        </Modal>
-      )}
-      {modal === "addExpense" && (
-        <Modal title="Add Expense" onClose={() => setModal(null)}>
-          <ExpenseForm onSave={async (f) => { await supabase.insert("expenses", { ...f, amount: Number(f.amount) || 0 }, token); setModal(null); fetchAll(); }} onCancel={() => setModal(null)} />
-        </Modal>
-      )}
-      {(modal === "cashIn" || modal === "cashOut") && (
-        <Modal title={modal === "cashIn" ? "Cash In" : "Cash Out"} onClose={() => setModal(null)}>
-          <CashForm onSave={async (f) => { await supabase.insert("cash_ops", { ...f, amount: Number(f.amount) || 0, type: modal === "cashIn" ? "in" : "out" }, token); setModal(null); fetchAll(); }} onCancel={() => setModal(null)} />
-        </Modal>
-      )}
-    </>
-  );
-}
+import{useState,useEffect,useCallback,useContext,createContext}from"react";import{supabase}from"./supabaseClient";import T from"./translations";
+const Lx=createContext("fr");const useT=()=>{const l=useContext(Lx);return T[l]||T.en};
+const LG=[{id:"en",f:"🇬🇧"},{id:"fr",f:"🇫🇷"},{id:"ar",f:"🇲🇦"}];
+const td=()=>new Date().toISOString().split("T")[0];const $=n=>`${Number(n||0).toLocaleString("fr-MA")} MAD`;
+const CS=["Scooter 50cc","Scooter 125cc","Scooter 150cc","Bike","E-Bike"];
+const SS=[{id:"low",k:"lowSeason",c:"#60a5fa"},{id:"mid",k:"midSeason",c:"#f59e0b"},{id:"high",k:"highSeason",c:"#ef4444"},{id:"custom",k:"customPrice",c:"#a855f7"}];
+const EC=["Fuel","Maintenance","Repair","Insurance","Rent","Utilities","Salary","Marketing","Parts","Tires","Oil Change","Registration","Cleaning","Other"];
+const MO=["Jan","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Déc"];
+function iR(ds,r){if(!ds)return false;const d=new Date(ds),n=new Date();if(typeof r==="object"&&r.from&&r.to){const f=new Date(r.from),t=new Date(r.to);f.setHours(0,0,0,0);t.setHours(23,59,59,999);return d>=f&&d<=t}if(r==="week"){const w=new Date(n);w.setDate(w.getDate()-7);return d>=w&&d<=n}if(r==="month")return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear();if(r==="year")return d.getFullYear()===n.getFullYear();return true}
+function cD(sd,st,ed,et){if(!sd||!ed)return null;const s=new Date(`${sd}T${st||"00:00"}`),e=new Date(`${ed}T${et||"00:00"}`);const ms=e-s;if(ms<=0)return null;const th=ms/36e5;return{days:Math.floor(th/24),hours:Math.floor(th%24),totalDays:Math.max(1,Math.ceil(th/24))}}
+function dU(ds){if(!ds)return null;const d=new Date(ds),n=new Date();n.setHours(0,0,0,0);d.setHours(0,0,0,0);return Math.ceil((d-n)/864e5)}
+function gM(items,f="amount",df="date"){const m=Array(12).fill(0);items.forEach(i=>{const d=new Date(i[df]);if(d.getFullYear()===new Date().getFullYear())m[d.getMonth()]+=Number(i[f])||0});return m}
+
+function useDB(u){const[d,sD]=useState({vehicles:[],contracts:[],expenses:[],revenue:[],cashOps:[],clients:[],reservations:[],alerts:[]});const[ld,sL]=useState(true);
+const fa=useCallback(async()=>{if(!u)return;sL(true);const[v,c,e,r,co,cl,rs,al]=await Promise.all([supabase.from("vehicles").select("*").order("created_at",{ascending:false}),supabase.from("contracts").select("*").order("created_at",{ascending:false}),supabase.from("expenses").select("*").order("date",{ascending:false}),supabase.from("revenue").select("*").order("date",{ascending:false}),supabase.from("cash_ops").select("*").order("date",{ascending:false}),supabase.from("clients").select("*").order("created_at",{ascending:false}),supabase.from("reservations").select("*").order("created_at",{ascending:false}),supabase.from("alerts").select("*").order("created_at",{ascending:false})]);sD({vehicles:v.data||[],contracts:c.data||[],expenses:e.data||[],revenue:r.data||[],cashOps:co.data||[],clients:cl.data||[],reservations:rs.data||[],alerts:al.data||[]});sL(false)},[u]);
+useEffect(()=>{fa()},[fa]);const lg=async(a,et,eid,det)=>{await supabase.from("activity_log").insert({user_id:u.id,action:a,entity_type:et,entity_id:eid,details:det||{}})};
+const aV=async f=>{const{data:rw,error}=await supabase.from("vehicles").insert({name:f.name,plate:f.plate,category:f.category,status:f.status,rate_low:+f.rateLow||0,rate_mid:+f.rateMid||0,rate_high:+f.rateHigh||0,year:+f.year||0,fuel_type:f.fuelType||"Essence",color:f.color||"",mileage:+f.mileage||0,insurance_expiry:f.insuranceExpiry||null,maintenance_due_km:+f.maintenanceDueKm||0,technical_visit_date:f.technicalVisit||null,notes:f.notes,created_by:u.id}).select().single();if(!error){await lg("create","vehicle",rw.id);await fa()}return{rw,error}};
+const uV=async(id,f)=>{const{error}=await supabase.from("vehicles").update({name:f.name,plate:f.plate,category:f.category,status:f.status,rate_low:+f.rateLow||0,rate_mid:+f.rateMid||0,rate_high:+f.rateHigh||0,year:+f.year||0,fuel_type:f.fuelType||"Essence",color:f.color||"",mileage:+f.mileage||0,insurance_expiry:f.insuranceExpiry||null,maintenance_due_km:+f.maintenanceDueKm||0,technical_visit_date:f.technicalVisit||null,notes:f.notes,updated_at:new Date().toISOString()}).eq("id",id);if(!error){await lg("update","vehicle",id);await fa()}return{error}};
+const dV=async id=>{await supabase.from("vehicles").delete().eq("id",id);await lg("delete","vehicle",id);await fa()};
+const aCl=async f=>{const{data:rw,error}=await supabase.from("clients").insert({full_name:f.fullName,cin:f.cin,phone:f.phone,email:f.email,city:f.city,address:f.address,driver_license:f.driverLicense,notes:f.notes,created_by:u.id}).select().single();if(!error){await lg("create","client",rw.id);await fa()}return{rw,error}};
+const uCl=async(id,f)=>{await supabase.from("clients").update({full_name:f.fullName,cin:f.cin,phone:f.phone,email:f.email,city:f.city,address:f.address,driver_license:f.driverLicense,notes:f.notes}).eq("id",id);await lg("update","client",id);await fa()};
+const dCl=async id=>{await supabase.from("clients").delete().eq("id",id);await lg("delete","client",id);await fa()};
+const blCl=async(id,reason)=>{await supabase.from("clients").update({is_blacklisted:true,blacklist_reason:reason,blacklist_date:td()}).eq("id",id);await lg("blacklist","client",id);await fa()};
+const unblCl=async id=>{await supabase.from("clients").update({is_blacklisted:false,blacklist_reason:"",blacklist_date:null}).eq("id",id);await lg("unblacklist","client",id);await fa()};
+const aCt=async f=>{const{data:rw,error}=await supabase.from("contracts").insert({client_name:f.clientName,client_phone:f.clientPhone,client_id:f.clientId,client_ref:f.clientRef||null,vehicle_id:f.vehicleId||null,start_date:f.startDate,start_time:f.startTime||"08:00",end_date:f.endDate||null,end_time:f.endTime||"08:00",season:f.season,total_amount:+f.totalAmount||0,deposit:+f.deposit||0,deposit_status:"held",amount_paid:+f.totalAmount||0,is_fully_paid:true,status:f.status,notes:f.notes,created_by:u.id}).select().single();
+if(!error){const{data:rv}=await supabase.from("revenue").insert({description:`Location — ${f.clientName}`,amount:+f.totalAmount||0,date:f.startDate||td(),vehicle_id:f.vehicleId||null,contract_id:rw.id,source:"Rental",created_by:u.id}).select().single();await supabase.from("cash_ops").insert({type:"in",amount:+f.totalAmount||0,date:f.startDate||td(),description:`Location: ${f.clientName}`,linked_id:rv?.id,created_by:u.id});if(f.status==="active"&&f.vehicleId)await supabase.from("vehicles").update({status:"rented"}).eq("id",f.vehicleId);await lg("create","contract",rw.id);await fa()}return{rw,error}};
+const uCt=async(id,f)=>{await supabase.from("contracts").update({client_name:f.clientName,client_phone:f.clientPhone,client_id:f.clientId,vehicle_id:f.vehicleId||null,start_date:f.startDate,start_time:f.startTime||"08:00",end_date:f.endDate||null,end_time:f.endTime||"08:00",season:f.season,total_amount:+f.totalAmount||0,deposit:+f.deposit||0,status:f.status,notes:f.notes}).eq("id",id);if(f.status==="completed"&&f.vehicleId)await supabase.from("vehicles").update({status:"available"}).eq("id",f.vehicleId);await lg("update","contract",id);await fa()};
+const dCt=async id=>{await supabase.from("contracts").delete().eq("id",id);await lg("delete","contract",id);await fa()};
+const kDep=async(c,amt,notes)=>{const k=+amt;const p=k<+c.deposit;await supabase.from("contracts").update({deposit_status:p?"kept-partial":"kept-full",kept_amount:k,damage_notes:notes}).eq("id",c.id);const{data:rv}=await supabase.from("revenue").insert({description:`Caution — ${c.client_name}`,amount:k,date:td(),vehicle_id:c.vehicle_id,contract_id:c.id,source:"Deposit Kept",created_by:u.id}).select().single();await supabase.from("cash_ops").insert({type:"in",amount:k,date:td(),description:`Caution: ${c.client_name}`,linked_id:rv?.id,created_by:u.id});await lg("keep_deposit","contract",c.id);await fa()};
+const rDep=async id=>{await supabase.from("contracts").update({deposit_status:"returned",kept_amount:0}).eq("id",id);await lg("return_deposit","contract",id);await fa()};
+const aEx=async f=>{const{data:rw,error}=await supabase.from("expenses").insert({description:f.description,amount:+f.amount,date:f.date,category:f.category,vehicle_id:f.vehicleId||null,paid_from:f.paidFrom||"cash",supplier:f.supplier||"",notes:f.notes,created_by:u.id}).select().single();if(!error){if(f.paidFrom==="cash")await supabase.from("cash_ops").insert({type:"out",amount:+f.amount,date:f.date,description:`Dépense: ${f.description}`,linked_id:rw.id,created_by:u.id});await lg("create","expense",rw.id);await fa()}return{rw,error}};
+const dEx=async id=>{await supabase.from("expenses").delete().eq("id",id);await lg("delete","expense",id);await fa()};
+const aRv=async f=>{const{data:rw,error}=await supabase.from("revenue").insert({description:f.description,amount:+f.amount,date:f.date,vehicle_id:f.vehicleId||null,source:f.source,created_by:u.id}).select().single();if(!error){await supabase.from("cash_ops").insert({type:"in",amount:+f.amount,date:f.date,description:`Revenu: ${f.description||f.source}`,linked_id:rw.id,created_by:u.id});await lg("create","revenue",rw.id);await fa()}return{rw,error}};
+const dRv=async id=>{await supabase.from("revenue").delete().eq("id",id);await lg("delete","revenue",id);await fa()};
+const aCO=async f=>{await supabase.from("cash_ops").insert({type:f.type,amount:+f.amount,date:f.date,description:f.description,reference:f.reference,created_by:u.id});await lg("create","cash_op",null);await fa()};
+const dCO=async id=>{await supabase.from("cash_ops").delete().eq("id",id);await lg("delete","cash_op",id);await fa()};
+const aRs=async f=>{await supabase.from("reservations").insert({client_id:f.clientId||null,vehicle_id:f.vehicleId||null,start_date:f.startDate,end_date:f.endDate,total_amount:+f.totalAmount||0,status:f.status||"confirmed",notes:f.notes,created_by:u.id});await lg("create","reservation",null);await fa()};
+const uRs=async(id,f)=>{await supabase.from("reservations").update({client_id:f.clientId||null,vehicle_id:f.vehicleId||null,start_date:f.startDate,end_date:f.endDate,total_amount:+f.totalAmount||0,status:f.status,notes:f.notes}).eq("id",id);await lg("update","reservation",id);await fa()};
+const dRs=async id=>{await supabase.from("reservations").delete().eq("id",id);await lg("delete","reservation",id);await fa()};
+return{data:d,loading:ld,refresh:fa,aV,uV,dV,aCl,uCl,dCl,blCl,unblCl,aCt,uCt,dCt,kDep,rDep,aEx,dEx,aRv,dRv,aCO,dCO,aRs,uRs,dRs}}
+
+/* UI */
+function Md({title,onClose,children,wide}){return<div style={Z.overlay} onClick={onClose}><div style={{...Z.modal,maxWidth:wide?720:520}} onClick={e=>e.stopPropagation()}><div style={Z.modalHeader}><h3 style={{margin:0,fontSize:17,color:"#f0f0f5"}}>{title}</h3><button onClick={onClose} style={Z.closeBtn}>✕</button></div><div style={Z.modalBody}>{children}</div></div></div>}
+function SC({label,value,sub,accent,icon}){return<div style={{...Z.statCard,borderLeft:`4px solid ${accent||"#E81224"}`}}><div style={{display:"flex",justifyContent:"space-between"}}><div><div style={Z.statLabel}>{label}</div><div style={Z.statValue}>{value}</div>{sub&&<div style={{fontSize:11,color:"#777",marginTop:2}}>{sub}</div>}</div>{icon&&<span style={{fontSize:20,opacity:.4}}>{icon}</span>}</div></div>}
+function In({label,...p}){return<div style={{marginBottom:12}}><label style={Z.label}>{label}</label>{p.type==="textarea"?<textarea{...p}style={Z.textarea}/>:p.type==="select"?<select{...p}style={Z.input}>{p.children}</select>:<input{...p}style={Z.input}/>}</div>}
+function TF({value:v,onChange}){const t=useT();const[sh,setSh]=useState(false);const[cf,sCf]=useState("");const[ct,sCt]=useState("");const ic=typeof v==="object";return<div style={{marginTop:12}}><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{[{k:"week",l:t.weekly},{k:"month",l:t.monthly},{k:"year",l:t.yearly},{k:"all",l:t.allTime}].map(f=><button key={f.k} onClick={()=>{onChange(f.k);setSh(false)}} style={{...Z.filterBtn,...(!ic&&v===f.k?Z.filterBtnActive:{})}}>{f.l}</button>)}<button onClick={()=>setSh(!sh)} style={{...Z.filterBtn,...(ic?Z.filterBtnActive:{})}}>📅 {ic?`${v.from}→${v.to}`:t.custom}</button></div>{sh&&<div style={{marginTop:8,background:"#16161f",border:"1px solid #2a2a3a",borderRadius:10,padding:12,display:"flex",gap:8,alignItems:"flex-end",flexWrap:"wrap"}}><div><label style={{...Z.label,fontSize:10}}>{t.from}</label><input type="date" value={cf} onChange={e=>sCf(e.target.value)} style={{...Z.input,width:140,padding:"6px 8px",fontSize:13}}/></div><div><label style={{...Z.label,fontSize:10}}>{t.to}</label><input type="date" value={ct} onChange={e=>sCt(e.target.value)} style={{...Z.input,width:140,padding:"6px 8px",fontSize:13}}/></div><button onClick={()=>{if(cf&&ct){onChange({from:cf,to:ct});setSh(false)}}} style={{...Z.primaryBtn,padding:"7px 14px",fontSize:12}}>{t.apply}</button></div>}</div>}
+function Br({items,c1,c2}){const mx=Math.max(...items.map(i=>i.v),1);return items.map(i=><div key={i.l} style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:2}}><span style={{fontWeight:600}}>{i.l}</span><span style={{fontFamily:"'Space Mono',monospace",fontSize:12}}>{$(i.v)}</span></div><div style={{background:"#1e1e2a",borderRadius:4,height:6,overflow:"hidden"}}><div style={{width:`${(i.v/mx)*100}%`,height:"100%",background:`linear-gradient(90deg,${c1},${c2})`,borderRadius:4,transition:"width .4s"}}/></div>{i.s&&<div style={{fontSize:10,color:"#666",marginTop:1}}>{i.s}</div>}</div>)}
+function BCM({d1,d2,l1,l2,c1,c2}){const mx=Math.max(...d1,...d2,1);return<div><div style={{display:"flex",gap:16,justifyContent:"flex-end",marginBottom:6,fontSize:10}}><span style={{color:c1}}>● {l1}</span><span style={{color:c2}}>● {l2}</span></div><svg viewBox="0 0 480 140" style={{width:"100%",height:140}}>{MO.map((m,i)=>{const bw=14,g=3,x=i*40+5,h1=(d1[i]/mx)*110,h2=(d2[i]/mx)*110;return<g key={i}><rect x={x} y={120-h1} width={bw} height={h1} fill={c1} rx="2" opacity=".85"/><rect x={x+bw+g} y={120-h2} width={bw} height={h2} fill={c2} rx="2" opacity=".85"/><text x={x+bw} y={135} textAnchor="middle" fill="#666" fontSize="8">{m}</text></g>})}</svg></div>}
+
+/* DASHBOARD */
+function Dash({data:d,timeRange:tr,setTimeRange}){const t=useT();const fR=d.revenue.filter(r=>iR(r.date,tr)),fE=d.expenses.filter(e=>iR(e.date,tr));const tR=fR.reduce((s,r)=>s+(+r.amount),0),tE=fE.reduce((s,e)=>s+(+e.amount),0),pr=tR-tE;const aC=d.contracts.filter(c=>c.status==="active");const ups=aC.filter(c=>!c.is_fully_paid).reduce((s,c)=>s+(+c.total_amount)-(+c.amount_paid||0),0);const ops=d.cashOps;const cb=ops.reduce((s,o)=>{if(o.type==="in"||o.type==="withdrawal")return s+(+o.amount);if(o.type==="out"||o.type==="deposit")return s-(+o.amount);return s},0);const bd=ops.filter(o=>o.type==="deposit").reduce((s,o)=>s+(+o.amount),0)-ops.filter(o=>o.type==="withdrawal").reduce((s,o)=>s+(+o.amount),0);const aV=d.vehicles.filter(v=>v.status==="available").length,rV=d.vehicles.filter(v=>v.status==="rented").length;const oR=d.vehicles.length?Math.round(rV/d.vehicles.length*100):0;const mR=gM(d.revenue),mE=gM(d.expenses),mP=mR.map((r,i)=>r-mE[i]);const cRv={};d.revenue.forEach(r=>{const c=d.contracts.find(cc=>cc.id===r.contract_id);if(c)cRv[c.client_name]=(cRv[c.client_name]||0)+(+r.amount)});const tC=Object.entries(cRv).sort((a,b)=>b[1]-a[1]).slice(0,5);const vRM={};d.revenue.forEach(r=>{if(r.vehicle_id)vRM[r.vehicle_id]=(vRM[r.vehicle_id]||0)+(+r.amount)});const tV=d.vehicles.map(v=>({...v,rev:vRM[v.id]||0})).sort((a,b)=>b.rev-a.rev).slice(0,6);const mg=tR?Math.round(pr/tR*100):0;const rC=d.contracts.filter(c=>c.status!=="cancelled").length;
+return<div><TF value={tr} onChange={setTimeRange}/>
+<div style={Z.statGrid}><SC label={t.totalRevenue} value={$(tR)} sub={`${rC} ${t.rentals}`} accent="#16a34a" icon="📈"/><SC label={t.totalExpenses} value={$(tE)} sub={`${fE.length} ${t.entries}`} accent="#dc2626" icon="📉"/><SC label={t.netProfit} value={$(pr)} sub={`${mg}% ${t.margin}`} accent={pr>=0?"#16a34a":"#dc2626"} icon="💰"/><SC label={t.unpaidPending} value={$(ups)} sub={`${aC.length} ${t.activeRentals}`} accent="#f59e0b" icon="⏳"/></div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginTop:12}}><SC label={t.totalClients} value={d.clients.length} accent="#0891b2"/><SC label={t.fleetSize} value={d.vehicles.length} sub={`${aV} ${t.available} · ${oR}%`} accent="#7c3aed"/><SC label={t.totalContracts} value={d.contracts.length} sub={`${aC.length} ${t.active}`} accent="#E81224"/><SC label={t.cashRegister} value={$(cb)} sub={`${t.inBank}: ${$(bd)}`} accent="#f59e0b"/></div>
+<div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:20,marginTop:20}}><div style={Z.card}><h4 style={Z.cardTitle}>{t.revenueVsExpenses} <span style={{fontSize:11,color:"#666",fontWeight:400}}>{t.byMonth} · {new Date().getFullYear()}</span></h4><BCM d1={mR} d2={mE} l1={t.totalRevenue} l2={t.totalExpenses} c1="#16a34a" c2="#E81224"/></div><div style={Z.card}><h4 style={Z.cardTitle}>{t.netProfitMonthly}</h4><svg viewBox="0 0 240 120" style={{width:"100%",height:120}}>{mP.map((v,i)=>{const mx=Math.max(...mP.map(Math.abs),1);const h=Math.abs(v)/mx*50;const y=v>=0?60-h:60;return<g key={i}><rect x={i*20+2} y={y} width={16} height={h} fill={v>=0?"#16a34a":"#E81224"} rx="2" opacity=".85"/><text x={i*20+10} y={115} textAnchor="middle" fill="#666" fontSize="7">{MO[i]}</text></g>})}<line x1="0" y1="60" x2="240" y2="60" stroke="#2a2a3a" strokeWidth=".5"/></svg></div></div>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginTop:20}}><div style={Z.card}><h4 style={Z.cardTitle}>{t.topClients}</h4>{tC.length===0&&<p style={Z.empty}>{t.noData}</p>}{tC.map(([n,rv],i)=><div key={n} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:"1px solid #1e1e2a"}}><div style={{width:28,height:28,borderRadius:"50%",background:["#16a34a","#0891b2","#7c3aed","#f59e0b","#E81224"][i],display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#fff"}}>{n.split(" ").map(w=>w[0]).join("").slice(0,2)}</div><div style={{flex:1,fontSize:13,fontWeight:600,color:"#e0e0e8"}}>{n}</div><div style={{fontFamily:"'Space Mono',monospace",fontSize:13,color:"#16a34a"}}>{$(rv)}</div></div>)}</div>
+<div style={Z.card}><h4 style={Z.cardTitle}>{t.vehiclePerformance}</h4>{tV.length===0&&<p style={Z.empty}>{t.noData}</p>}{tV.map((v,i)=><div key={v.id} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:"1px solid #1e1e2a"}}><span style={{fontSize:12,color:"#666",fontWeight:700,width:16}}>{i+1}</span><div style={{flex:1}}><div style={{fontSize:13,fontWeight:600,color:"#e0e0e8"}}>{v.name}</div><div style={{fontSize:10,color:"#666"}}>{v.plate}</div></div><div style={{fontFamily:"'Space Mono',monospace",fontSize:13,color:"#16a34a"}}>{$(v.rev)}</div></div>)}</div></div>
+{d.contracts.filter(c=>c.status==="active"&&c.end_date&&new Date(c.end_date)<new Date()).length>0&&<div style={{...Z.card,marginTop:20,borderColor:"#E8122433"}}><h4 style={{...Z.cardTitle,color:"#E81224"}}>⚠ {t.lateReturn}</h4>{d.contracts.filter(c=>c.status==="active"&&c.end_date&&new Date(c.end_date)<new Date()).map(c=><div key={c.id} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #2a1010",fontSize:13}}><span><span style={{fontWeight:600,color:"#f87171"}}>{c.client_name}</span> — {d.vehicles.find(v=>v.id===c.vehicle_id)?.name||"?"}</span><span style={{color:"#E81224",fontWeight:700}}>+{Math.abs(dU(c.end_date))}j</span></div>)}</div>}
+</div>}
+
+/* FLEET */
+function Fl({data:d,db,profile:p}){const t=useT();const[sh,sSh]=useState(false);const[eI,sEI]=useState(null);const iA=p?.role==="admin";const em={name:"",plate:"",category:CS[0],status:"available",rateLow:"",rateMid:"",rateHigh:"",year:"",fuelType:"Essence",color:"",mileage:"",insuranceExpiry:"",maintenanceDueKm:"",technicalVisit:"",notes:""};const[f,sF]=useState(em);
+const sv=async()=>{if(!f.name)return;if(eI)await db.uV(eI,f);else await db.aV(f);sF(em);sSh(false);sEI(null)};const ed=v=>{sF({name:v.name,plate:v.plate,category:v.category,status:v.status,rateLow:v.rate_low||"",rateMid:v.rate_mid||"",rateHigh:v.rate_high||"",year:v.year||"",fuelType:v.fuel_type||"Essence",color:v.color||"",mileage:v.mileage||"",insuranceExpiry:v.insurance_expiry||"",maintenanceDueKm:v.maintenance_due_km||"",technicalVisit:v.technical_visit_date||"",notes:v.notes||""});sEI(v.id);sSh(true)};
+const vRM={};d.revenue.forEach(r=>{if(r.vehicle_id)vRM[r.vehicle_id]=(vRM[r.vehicle_id]||0)+(+r.amount)});
+return<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><h3 style={{margin:0,color:"#e0e0e8",fontSize:20,fontFamily:"'Rajdhani',sans-serif"}}>{t.fleetManagement}</h3><div style={{fontSize:13,color:"#777"}}>{d.vehicles.length} {t.vehicle}s</div></div><button style={Z.primaryBtn} onClick={()=>{sEI(null);sF(em);sSh(true)}}>{t.addVehicle}</button></div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginTop:12,marginBottom:16}}><SC label={t.total} value={d.vehicles.length} accent="#7c3aed"/><SC label={t.available} value={d.vehicles.filter(v=>v.status==="available").length} accent="#16a34a"/><SC label={t.rented} value={d.vehicles.filter(v=>v.status==="rented").length} accent="#f59e0b"/><SC label={t.maintenance} value={d.vehicles.filter(v=>v.status==="maintenance").length} accent="#dc2626"/></div>
+{sh&&<Md title={eI?t.editVehicle:t.addVehicle} onClose={()=>sSh(false)} wide><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><In label={t.vehicleName+" *"} value={f.name} onChange={e=>sF({...f,name:e.target.value})}/><In label={t.licensePlate} value={f.plate} onChange={e=>sF({...f,plate:e.target.value})}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:12}}><In label={t.year} type="number" value={f.year} onChange={e=>sF({...f,year:e.target.value})}/><In label={t.fuelType} type="select" value={f.fuelType} onChange={e=>sF({...f,fuelType:e.target.value})}><option>Essence</option><option>Diesel</option><option>Electric</option></In><In label={t.color} value={f.color} onChange={e=>sF({...f,color:e.target.value})}/><In label={t.mileage} type="number" value={f.mileage} onChange={e=>sF({...f,mileage:e.target.value})}/></div><In label={t.category} type="select" value={f.category} onChange={e=>sF({...f,category:e.target.value})}>{CS.map(c=><option key={c}>{c}</option>)}</In>
+<div style={{background:"#111118",border:"1px solid #2a2a3a",borderRadius:10,padding:14,marginBottom:12}}><div style={{fontSize:12,fontWeight:700,color:"#e0e0e8",marginBottom:8}}>{t.dailyRate} (MAD)</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>{SS.filter(s=>s.id!=="custom").map(s=><div key={s.id}><label style={{...Z.label,color:s.c,fontSize:10}}>{t[s.k]}</label><input type="number" placeholder="MAD" style={Z.input} value={f[`rate${s.id[0].toUpperCase()+s.id.slice(1)}`]||""} onChange={e=>sF({...f,[`rate${s.id[0].toUpperCase()+s.id.slice(1)}`]:e.target.value})}/></div>)}</div></div>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}><In label={t.insuranceExpiry} type="date" value={f.insuranceExpiry} onChange={e=>sF({...f,insuranceExpiry:e.target.value})}/><In label={t.maintenanceDueKm} type="number" value={f.maintenanceDueKm} onChange={e=>sF({...f,maintenanceDueKm:e.target.value})}/><In label={t.technicalVisit} type="date" value={f.technicalVisit} onChange={e=>sF({...f,technicalVisit:e.target.value})}/></div>
+<In label={t.status} type="select" value={f.status} onChange={e=>sF({...f,status:e.target.value})}><option value="available">{t.available}</option><option value="rented">{t.rented}</option><option value="maintenance">{t.maintenance}</option></In><In label={t.notes} type="textarea" value={f.notes} onChange={e=>sF({...f,notes:e.target.value})}/><button style={Z.primaryBtn} onClick={sv}>{eI?t.update:t.create}</button></Md>}
+{d.vehicles.map(v=>{const iD=dU(v.insurance_expiry),vD=dU(v.technical_visit_date);return<div key={v.id} style={{display:"flex",alignItems:"center",padding:"10px 0",borderBottom:"1px solid #1e1e2a",gap:10}}><div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:700,color:"#e0e0e8",fontSize:14}}>{v.name}</span>{v.year>0&&<span style={{fontSize:12,color:"#888"}}>{v.year}</span>}<span style={{fontSize:11,color:"#666"}}>{v.plate}</span><span style={{...Z.badge,background:v.status==="available"?"#0a2a15":v.status==="rented"?"#2a2210":"#2a1010",color:v.status==="available"?"#16a34a":v.status==="rented"?"#d97706":"#dc2626",fontSize:10}}>{t[v.status]||v.status}</span></div><div style={{fontSize:11,color:"#666",marginTop:2}}>{v.mileage>0&&`${Number(v.mileage).toLocaleString()} km · `}{v.color||""} {v.fuel_type||""}{iD!==null&&iD<=30&&<span style={{color:iD<=0?"#dc2626":"#f59e0b",marginLeft:6}}>⚠ {t.insuranceExpiresIn} {iD}j</span>}{vD!==null&&vD<=30&&<span style={{color:vD<=0?"#dc2626":"#f59e0b",marginLeft:6}}>⚠ {t.visitIn} {vD}j</span>}</div></div><div style={{textAlign:"right"}}><div style={{fontFamily:"'Space Mono',monospace",color:"#E81224",fontSize:14,fontWeight:700}}>{$(v.rate_mid||0)}/j</div><div style={{fontSize:10,color:"#666"}}>{$(vRM[v.id]||0)} CA</div></div><div style={{display:"flex",gap:4}}><button style={Z.smallBtn} onClick={()=>ed(v)}>✎</button>{iA&&<button style={{...Z.smallBtn,color:"#dc2626"}} onClick={async()=>{if(confirm("?"))await db.dV(v.id)}}>✕</button>}</div></div>})}</div>}
+
+/* CLIENTS */
+function Cl({data:d,db,profile:p}){const t=useT();const[sh,sSh]=useState(false);const[eI,sEI]=useState(null);const[sr,sSr]=useState("");const iA=p?.role==="admin";const em={fullName:"",cin:"",phone:"",email:"",city:"",address:"",driverLicense:"",notes:""};const[f,sF]=useState(em);
+const sv=async()=>{if(!f.fullName)return;if(eI)await db.uCl(eI,f);else await db.aCl(f);sF(em);sSh(false);sEI(null)};const ed=c=>{sF({fullName:c.full_name,cin:c.cin||"",phone:c.phone||"",email:c.email||"",city:c.city||"",address:c.address||"",driverLicense:c.driver_license||"",notes:c.notes||""});sEI(c.id);sSh(true)};
+const cCt={};d.contracts.forEach(c=>{const cl=d.clients.find(x=>x.full_name===c.client_name||x.id===c.client_ref);if(cl)cCt[cl.id]=(cCt[cl.id]||0)+1});const cRv={};d.contracts.forEach(c=>{const rv=d.revenue.filter(r=>r.contract_id===c.id).reduce((s,r)=>s+(+r.amount),0);const cl=d.clients.find(x=>x.full_name===c.client_name||x.id===c.client_ref);if(cl)cRv[cl.id]=(cRv[cl.id]||0)+rv});
+const fl=d.clients.filter(c=>c.full_name?.toLowerCase().includes(sr.toLowerCase())||c.cin?.includes(sr)||c.phone?.includes(sr));
+return<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><h3 style={{margin:0,color:"#e0e0e8",fontSize:20,fontFamily:"'Rajdhani',sans-serif"}}>{t.clientList}</h3><div style={{fontSize:13,color:"#777"}}>{d.clients.length} {t.client}s</div></div><button style={Z.primaryBtn} onClick={()=>{sEI(null);sF(em);sSh(true)}}>{t.newClient}</button></div>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginTop:12,marginBottom:12}}><SC label={t.total} value={d.clients.length} accent="#7c3aed"/><SC label={t.activeClients} value={d.clients.filter(c=>!c.is_blacklisted).length} accent="#16a34a"/><SC label={t.blacklisted} value={d.clients.filter(c=>c.is_blacklisted).length} accent="#dc2626"/></div>
+<input style={{...Z.input,marginBottom:12}} placeholder={t.search+"..."} value={sr} onChange={e=>sSr(e.target.value)}/>
+{sh&&<Md title={eI?t.edit:t.newClient} onClose={()=>sSh(false)} wide><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><In label={t.clientName+" *"} value={f.fullName} onChange={e=>sF({...f,fullName:e.target.value})}/><In label={t.cin} value={f.cin} onChange={e=>sF({...f,cin:e.target.value})}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><In label={t.phone} value={f.phone} onChange={e=>sF({...f,phone:e.target.value})} placeholder="+212..."/><In label={t.email} value={f.email} onChange={e=>sF({...f,email:e.target.value})}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><In label={t.city} value={f.city} onChange={e=>sF({...f,city:e.target.value})}/><In label={t.driverLicense} value={f.driverLicense} onChange={e=>sF({...f,driverLicense:e.target.value})}/></div><In label={t.notes} type="textarea" value={f.notes} onChange={e=>sF({...f,notes:e.target.value})}/><button style={Z.primaryBtn} onClick={sv}>{eI?t.update:t.create}</button></Md>}
+{fl.map(c=><div key={c.id} style={{display:"flex",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #1e1e2a",gap:10}}><div style={{width:34,height:34,borderRadius:"50%",background:c.is_blacklisted?"#dc2626":"#16a34a",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#fff"}}>{c.full_name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase()}</div><div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontWeight:700,color:"#e0e0e8",fontSize:13}}>{c.full_name}</span>{c.cin&&<span style={{fontSize:10,color:"#888"}}>{c.cin}</span>}{c.is_blacklisted&&<span style={{...Z.badge,background:"#2a1010",color:"#dc2626",fontSize:9}}>🚫</span>}</div><div style={{fontSize:10,color:"#666"}}>{c.phone&&`📞 ${c.phone}`}{c.city&&` · 📍 ${c.city}`}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:11,fontWeight:600,color:"#e0e0e8"}}>{cCt[c.id]||0} {t.locations}</div><div style={{fontFamily:"'Space Mono',monospace",fontSize:12,color:"#16a34a"}}>{$(cRv[c.id]||0)}</div></div><div style={{display:"flex",gap:4}}><button style={Z.smallBtn} onClick={()=>ed(c)}>✎</button>{iA&&<button style={{...Z.smallBtn,color:"#dc2626"}} onClick={async()=>{if(confirm("?"))await db.dCl(c.id)}}>✕</button>}</div></div>)}</div>}
+
+/* BLACKLIST */
+function BL({data:d,db}){const t=useT();const[sh,sSh]=useState(false);const[sc,sSc]=useState("");const[rs,sRs]=useState("");const bl=d.clients.filter(c=>c.is_blacklisted);
+return<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><h3 style={{margin:0,color:"#e0e0e8",fontSize:20,fontFamily:"'Rajdhani',sans-serif"}}>🚫 {t.blacklistTitle}</h3><div style={{fontSize:13,color:"#777"}}>{bl.length} {t.client}(s)</div></div><button style={{...Z.primaryBtn,background:"#dc2626"}} onClick={()=>sSh(true)}>{t.addToBlacklist}</button></div>
+{sh&&<Md title={t.addToBlacklist} onClose={()=>sSh(false)}><In label={t.selectClient} type="select" value={sc} onChange={e=>sSc(e.target.value)}><option value="">—</option>{d.clients.filter(c=>!c.is_blacklisted).map(c=><option key={c.id} value={c.id}>{c.full_name}</option>)}</In><In label={t.blacklistReason+" *"} type="textarea" value={rs} onChange={e=>sRs(e.target.value)}/><button style={{...Z.primaryBtn,background:"#dc2626"}} onClick={async()=>{if(sc&&rs){await db.blCl(sc,rs);sSc("");sRs("");sSh(false)}}}>{t.confirm}</button></Md>}
+{bl.length===0&&<div style={{...Z.card,marginTop:20,textAlign:"center",padding:40}}><p style={Z.empty}>{t.noData}</p></div>}
+{bl.map(c=><div key={c.id} style={{...Z.card,marginTop:12,display:"flex",alignItems:"center",gap:12}}><div style={{width:40,height:40,borderRadius:"50%",background:"#2a1010",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🚫</div><div style={{flex:1}}><div style={{fontWeight:700,color:"#f87171"}}>{c.full_name} <span style={{fontSize:11,color:"#888"}}>{c.cin}</span></div><div style={{fontSize:12,color:"#888"}}>{c.blacklist_reason}</div><div style={{fontSize:10,color:"#666"}}>{c.blacklist_date}{c.phone&&` · ${c.phone}`}{c.city&&` · ${c.city}`}</div></div><button style={{...Z.smallBtn,color:"#16a34a",borderColor:"#16a34a33"}} onClick={()=>db.unblCl(c.id)}>✓ {t.removeFromBlacklist}</button></div>)}</div>}
+
+/* CONTRACTS */
+function Ct({data:d,db,profile:p}){const t=useT();const[sh,sSh]=useState(false);const[eI,sEI]=useState(null);const[sr,sSr]=useState("");const iA=p?.role==="admin";const[sK,sSK]=useState(null);const[kF,sKF]=useState({a:"",n:""});
+const em={clientName:"",clientPhone:"",clientId:"",clientRef:"",vehicleId:"",startDate:td(),startTime:"08:00",endDate:"",endTime:"08:00",season:"mid",totalAmount:"",customPrice:"",deposit:"",status:"active",notes:""};const[f,sF]=useState(em);
+const gD=ff=>cD(ff.startDate,ff.startTime,ff.endDate,ff.endTime);
+const aC=ff=>{const dur=gD(ff);if(ff.season==="custom"){if(dur&&ff.customPrice&&+ff.customPrice>0)return{...ff,totalAmount:String(dur.totalDays*(+ff.customPrice))};return ff}const v=d.vehicles.find(vv=>vv.id===ff.vehicleId);if(v&&dur&&ff.season){const r=+(v[`rate_${ff.season}`]||0);if(r>0)return{...ff,totalAmount:String(dur.totalDays*r)}}return ff};
+const sv=async()=>{if(!f.clientName||!f.vehicleId)return;if(eI)await db.uCt(eI,f);else await db.aCt(f);sF(em);sSh(false);sEI(null)};
+const ed=c=>{sF({clientName:c.client_name,clientPhone:c.client_phone||"",clientId:c.client_id||"",clientRef:c.client_ref||"",vehicleId:c.vehicle_id||"",startDate:c.start_date,startTime:c.start_time||"08:00",endDate:c.end_date||"",endTime:c.end_time||"08:00",season:c.season,totalAmount:String(c.total_amount),customPrice:c.season==="custom"?String(c.total_amount):"",deposit:String(c.deposit),status:c.status,notes:c.notes||""});sEI(c.id);sSh(true)};
+const fl=d.contracts.filter(c=>c.client_name?.toLowerCase().includes(sr.toLowerCase())||c.client_phone?.includes(sr)||c.client_id?.toLowerCase().includes(sr.toLowerCase()));const gV=id=>d.vehicles.find(v=>v.id===id)?.name||"—";const dur=gD(f);
+return<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><h3 style={{margin:0,color:"#e0e0e8",fontSize:20,fontFamily:"'Rajdhani',sans-serif"}}>{t.clientContracts}</h3><div style={{fontSize:13,color:"#777"}}>{d.contracts.length} {t.total}</div></div><button style={Z.primaryBtn} onClick={()=>{sEI(null);sF(em);sSh(true)}}>{t.newContract}</button></div>
+<input style={{...Z.input,marginTop:12,marginBottom:16}} placeholder={t.searchContracts} value={sr} onChange={e=>sSr(e.target.value)}/>
+{sh&&<Md title={eI?t.editContract:t.newContract} onClose={()=>sSh(false)} wide>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><In label={t.clientName+" *"} value={f.clientName} onChange={e=>sF({...f,clientName:e.target.value})}/><In label={t.phone} value={f.clientPhone} onChange={e=>sF({...f,clientPhone:e.target.value})}/></div>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><In label={t.cin} value={f.clientId} onChange={e=>sF({...f,clientId:e.target.value})}/><In label={t.vehicle+" *"} type="select" value={f.vehicleId} onChange={e=>sF(aC({...f,vehicleId:e.target.value}))}><option value="">—</option>{d.vehicles.map(v=><option key={v.id} value={v.id}>{v.name} ({v.plate||v.category})</option>)}</In></div>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><div style={{background:"#111118",border:"1px solid #2a2a3a",borderRadius:10,padding:12}}><div style={{fontSize:11,fontWeight:700,color:"#16a34a",marginBottom:6}}>🛫 {t.departure}</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><label style={{...Z.label,fontSize:9}}>{t.date}</label><input type="date" style={Z.input} value={f.startDate} onChange={e=>sF(aC({...f,startDate:e.target.value}))}/></div><div><label style={{...Z.label,fontSize:9}}>Time</label><input type="time" style={Z.input} value={f.startTime} onChange={e=>sF(aC({...f,startTime:e.target.value}))}/></div></div></div><div style={{background:"#111118",border:"1px solid #2a2a3a",borderRadius:10,padding:12}}><div style={{fontSize:11,fontWeight:700,color:"#E81224",marginBottom:6}}>🛬 {t.returnLabel}</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><label style={{...Z.label,fontSize:9}}>{t.date}</label><input type="date" style={Z.input} value={f.endDate} onChange={e=>sF(aC({...f,endDate:e.target.value}))}/></div><div><label style={{...Z.label,fontSize:9}}>Time</label><input type="time" style={Z.input} value={f.endTime} onChange={e=>sF(aC({...f,endTime:e.target.value}))}/></div></div></div></div>
+{dur&&<div style={{background:"#0a1a10",border:"1px solid #16a34a33",borderRadius:8,padding:"8px 12px",marginTop:8,marginBottom:8,fontSize:13,color:"#4ade80",display:"flex",gap:6}}>⏱ <strong>{dur.days>0?`${dur.days}j`:""}{dur.hours>0?` ${dur.hours}h`:""}</strong><span style={{marginLeft:"auto",fontSize:11,color:"#16a34a"}}>({dur.totalDays}j {t.billed})</span></div>}
+<In label={t.season} type="select" value={f.season} onChange={e=>sF(aC({...f,season:e.target.value}))}>{SS.map(s=><option key={s.id} value={s.id}>{t[s.k]}</option>)}</In>
+{f.vehicleId&&f.season==="custom"&&<div style={{background:"#1a152a",border:"1px solid #7c3aed44",borderRadius:10,padding:12,marginBottom:12}}><div style={{fontSize:11,fontWeight:700,color:"#a855f7",marginBottom:6}}>💜 {t.customDailyRate}</div><input type="number" placeholder="MAD/jour" style={{...Z.input,fontSize:16,fontWeight:700,fontFamily:"'Space Mono',monospace"}} value={f.customPrice} onChange={e=>sF(aC({...f,customPrice:e.target.value}))}/>{dur&&f.customPrice&&+f.customPrice>0&&<div style={{fontSize:12,color:"#a855f7",marginTop:6}}>{$(f.customPrice)}/j × {dur.totalDays}j = <strong>{$(dur.totalDays*(+f.customPrice))}</strong></div>}</div>}
+{f.vehicleId&&f.season!=="custom"&&(()=>{const v=d.vehicles.find(vv=>vv.id===f.vehicleId);const r=v?.[`rate_${f.season}`];if(!r)return null;return<div style={{background:"#2a2210",border:"1px solid #5c4a1a",borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:13,color:"#fbbf24"}}>{$(r)}/j{dur&&<> · {dur.totalDays}j = <strong>{$(dur.totalDays*(+r))}</strong></>}</div>})()}
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><In label={t.totalAmount+" (MAD)"} type="number" value={f.totalAmount} onChange={e=>sF({...f,totalAmount:e.target.value})}/><In label={t.deposit+" (MAD)"} type="number" value={f.deposit} onChange={e=>sF({...f,deposit:e.target.value})}/></div>
+<In label={t.status} type="select" value={f.status} onChange={e=>sF({...f,status:e.target.value})}><option value="active">{t.active}</option><option value="completed">{t.completed}</option><option value="cancelled">{t.cancelled}</option></In>
+<In label={t.notes} type="textarea" value={f.notes} onChange={e=>sF({...f,notes:e.target.value})}/><button style={Z.primaryBtn} onClick={sv}>{eI?t.update:t.create}</button></Md>}
+{sK&&(()=>{const c=d.contracts.find(x=>x.id===sK);if(!c)return null;return<Md title={t.keepDepositTitle} onClose={()=>sSK(null)}><div style={{background:"#2a1515",border:"1px solid #5c2a2a",borderRadius:8,padding:12,marginBottom:14,fontSize:13}}>{t.client}: {c.client_name} · {t.deposit}: {$(c.deposit)}</div><In label={t.amountToKeep+" *"} type="number" value={kF.a} onChange={e=>sKF({...kF,a:e.target.value})}/><In label={t.damageDescription+" *"} type="textarea" value={kF.n} onChange={e=>sKF({...kF,n:e.target.value})}/><button style={{...Z.primaryBtn,background:"#dc2626"}} onClick={async()=>{await db.kDep(c,kF.a,kF.n);sSK(null)}}>{t.confirmKeep} {$(kF.a)}</button></Md>})()}
+{fl.map(c=>{const ds=c.deposit_status||"held";const isL=c.status==="active"&&c.end_date&&new Date(c.end_date)<new Date();const dL=isL?Math.abs(dU(c.end_date)):0;
+return<div key={c.id} style={{display:"flex",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #1e1e2a",gap:8}}>
+<div style={{width:28,height:28,borderRadius:"50%",background:c.status==="active"?"#0a2a15":c.status==="completed"?"#10102a":"#2a1010",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12}}>{c.status==="active"?"🟢":c.status==="completed"?"🔵":"🔴"}</div>
+<div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}><span style={{fontWeight:700,color:"#e0e0e8",fontSize:13}}>{c.client_name}</span>{isL&&<span style={{...Z.badge,background:"#2a1010",color:"#f87171",fontSize:9}}>⚠ +{dL}j</span>}{ds==="kept-full"&&<span style={{...Z.badge,background:"#2a1010",color:"#dc2626",fontSize:9}}>💔</span>}</div><div style={{fontSize:10,color:"#666"}}>{gV(c.vehicle_id)} · {c.start_date} → {c.end_date||"—"}</div></div>
+<div style={{fontFamily:"'Space Mono',monospace",fontSize:13,fontWeight:700,color:"#e0e0e8"}}>{$(c.total_amount)}</div>
+<div style={{display:"flex",gap:3}}><button style={Z.smallBtn} onClick={()=>ed(c)}>✎</button>{ds==="held"&&+c.deposit>0&&<><button style={{...Z.smallBtn,color:"#dc2626"}} onClick={()=>{sSK(c.id);sKF({a:String(c.deposit),n:""})}}>💔</button><button style={{...Z.smallBtn,color:"#16a34a"}} onClick={()=>db.rDep(c.id)}>✓</button></>}{iA&&<button style={{...Z.smallBtn,color:"#dc2626"}} onClick={()=>db.dCt(c.id)}>✕</button>}</div></div>})}</div>}
+
+/* RESERVATIONS */
+function Rs({data:d,db,profile:p}){const t=useT();const[sh,sSh]=useState(false);const[eI,sEI]=useState(null);const iA=p?.role==="admin";const em={clientId:"",vehicleId:"",startDate:td(),endDate:"",totalAmount:"",status:"confirmed",notes:""};const[f,sF]=useState(em);
+const sv=async()=>{if(!f.vehicleId)return;if(eI)await db.uRs(eI,f);else await db.aRs(f);sF(em);sSh(false);sEI(null)};const ed=r=>{sF({clientId:r.client_id||"",vehicleId:r.vehicle_id||"",startDate:r.start_date,endDate:r.end_date,totalAmount:String(r.total_amount),status:r.status,notes:r.notes||""});sEI(r.id);sSh(true)};
+return<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><h3 style={{margin:0,color:"#e0e0e8",fontSize:20,fontFamily:"'Rajdhani',sans-serif"}}>{t.reservations}</h3><div style={{fontSize:13,color:"#777"}}>{d.reservations.length} {t.total}</div></div><button style={Z.primaryBtn} onClick={()=>{sEI(null);sF(em);sSh(true)}}>+ {t.create}</button></div>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginTop:12,marginBottom:12}}><SC label={t.total} value={d.reservations.length} accent="#7c3aed"/><SC label="Confirmées" value={d.reservations.filter(r=>r.status==="confirmed").length} accent="#16a34a"/><SC label="En attente" value={d.reservations.filter(r=>r.status==="pending").length} accent="#f59e0b"/></div>
+{sh&&<Md title={eI?t.edit:t.create} onClose={()=>sSh(false)}><In label={t.client} type="select" value={f.clientId} onChange={e=>sF({...f,clientId:e.target.value})}><option value="">—</option>{d.clients.filter(c=>!c.is_blacklisted).map(c=><option key={c.id} value={c.id}>{c.full_name}</option>)}</In><In label={t.vehicle} type="select" value={f.vehicleId} onChange={e=>sF({...f,vehicleId:e.target.value})}><option value="">—</option>{d.vehicles.map(v=><option key={v.id} value={v.id}>{v.name}</option>)}</In><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><In label={t.from} type="date" value={f.startDate} onChange={e=>sF({...f,startDate:e.target.value})}/><In label={t.to} type="date" value={f.endDate} onChange={e=>sF({...f,endDate:e.target.value})}/></div><In label={t.totalAmount} type="number" value={f.totalAmount} onChange={e=>sF({...f,totalAmount:e.target.value})}/><In label={t.status} type="select" value={f.status} onChange={e=>sF({...f,status:e.target.value})}><option value="confirmed">Confirmée</option><option value="pending">En attente</option><option value="cancelled">Annulée</option></In><In label={t.notes} type="textarea" value={f.notes} onChange={e=>sF({...f,notes:e.target.value})}/><button style={Z.primaryBtn} onClick={sv}>{eI?t.update:t.create}</button></Md>}
+{d.reservations.map(r=>{const cl=d.clients.find(c=>c.id===r.client_id);const v=d.vehicles.find(vv=>vv.id===r.vehicle_id);const dy=r.start_date&&r.end_date?Math.max(1,Math.ceil((new Date(r.end_date)-new Date(r.start_date))/864e5)):0;
+return<div key={r.id} style={{display:"flex",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #1e1e2a",gap:8}}><span style={{...Z.badge,background:r.status==="confirmed"?"#0a2a15":r.status==="pending"?"#2a2210":"#2a1010",color:r.status==="confirmed"?"#16a34a":r.status==="pending"?"#d97706":"#dc2626",fontSize:10}}>{r.status}</span><div style={{flex:1}}><div style={{fontWeight:600,color:"#e0e0e8",fontSize:13}}>{cl?.full_name||"—"} · {v?.name||"—"}</div><div style={{fontSize:10,color:"#666"}}>{r.start_date} → {r.end_date} ({dy}j)</div></div><div style={{fontFamily:"'Space Mono',monospace",fontSize:13,color:"#e0e0e8"}}>{$(r.total_amount)}</div><div style={{display:"flex",gap:3}}><button style={Z.smallBtn} onClick={()=>ed(r)}>✎</button>{iA&&<button style={{...Z.smallBtn,color:"#dc2626"}} onClick={()=>db.dRs(r.id)}>✕</button>}</div></div>})}</div>}
+
+/* EXPENSES */
+function Ex({data:d,db,profile:p,timeRange:tr,setTimeRange:sTR}){const t=useT();const[sh,sSh]=useState(false);const iA=p?.role==="admin";const em={description:"",amount:"",date:td(),category:"Fuel",vehicleId:"",paidFrom:"cash",supplier:"",notes:""};const[f,sF]=useState(em);
+const sv=async()=>{if(!f.description||!f.amount)return;await db.aEx(f);sF(em);sSh(false)};const fl=d.expenses.filter(e=>iR(e.date,tr));const tot=fl.reduce((s,e)=>s+(+e.amount),0);const cT={};fl.forEach(e=>{cT[e.category]=(cT[e.category]||0)+(+e.amount)});
+return<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h3 style={{margin:0,color:"#e0e0e8",fontSize:20,fontFamily:"'Rajdhani',sans-serif"}}>{t.expensesTracker}</h3><button style={Z.primaryBtn} onClick={()=>{sF(em);sSh(true)}}>{t.addExpense}</button></div><TF value={tr} onChange={sTR}/>
+<div style={Z.statGrid}><SC label={t.totalExpenses} value={$(tot)} accent="#dc2626"/><SC label={t.paidFromCash} value={$(fl.filter(e=>e.paid_from!=="bank").reduce((s,e)=>s+(+e.amount),0))} accent="#f59e0b"/><SC label={t.paidFromBank} value={$(fl.filter(e=>e.paid_from==="bank").reduce((s,e)=>s+(+e.amount),0))} accent="#0891b2"/></div>
+{sh&&<Md title={t.addExpense} onClose={()=>sSh(false)}><In label={t.description+" *"} value={f.description} onChange={e=>sF({...f,description:e.target.value})}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><In label={t.amount+" *"} type="number" value={f.amount} onChange={e=>sF({...f,amount:e.target.value})}/><In label={t.date} type="date" value={f.date} onChange={e=>sF({...f,date:e.target.value})}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><In label={t.category} type="select" value={f.category} onChange={e=>sF({...f,category:e.target.value})}>{EC.map(c=><option key={c} value={c}>{c}</option>)}</In><In label={t.vehicle} type="select" value={f.vehicleId} onChange={e=>sF({...f,vehicleId:e.target.value})}><option value="">{t.globalOffice}</option>{d.vehicles.map(v=><option key={v.id} value={v.id}>{v.name}</option>)}</In></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><In label={t.paidFrom} type="select" value={f.paidFrom} onChange={e=>sF({...f,paidFrom:e.target.value})}><option value="cash">💵 {t.paidFromCash}</option><option value="bank">🏦 {t.paidFromBank}</option></In><In label={t.supplier} value={f.supplier} onChange={e=>sF({...f,supplier:e.target.value})}/></div><In label={t.notes} type="textarea" value={f.notes} onChange={e=>sF({...f,notes:e.target.value})}/><button style={Z.primaryBtn} onClick={sv}>{t.create}</button></Md>}
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginTop:20}}><div style={Z.card}><h4 style={Z.cardTitle}>{t.byCategory}</h4>{Object.keys(cT).length===0&&<p style={Z.empty}>{t.noData}</p>}<Br items={Object.entries(cT).sort((a,b)=>b[1]-a[1]).map(([k,v])=>({l:k,v}))} c1="#dc2626" c2="#f87171"/></div><div style={Z.card}><h4 style={Z.cardTitle}>{t.recentExpenses}</h4>{fl.slice(0,10).map(e=><div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid #1e1e2a",fontSize:12}}><div><div style={{fontWeight:600,color:"#e0e0e8"}}>{e.description}</div><div style={{fontSize:10,color:"#666"}}>{e.date} · {e.category}{e.supplier&&` · ${e.supplier}`} · {e.paid_from==="bank"?"🏦":"💵"}</div></div><div style={{display:"flex",gap:4}}><span style={{fontFamily:"'Space Mono',monospace",color:"#dc2626"}}>{$(e.amount)}</span>{iA&&<button style={{...Z.smallBtn,color:"#dc2626",padding:"1px 4px",fontSize:10}} onClick={()=>db.dEx(e.id)}>✕</button>}</div></div>)}</div></div></div>}
+
+/* REVENUE */
+function Rv({data:d,db,profile:p,timeRange:tr,setTimeRange:sTR}){const t=useT();const[sh,sSh]=useState(false);const iA=p?.role==="admin";const em={description:"",amount:"",date:td(),vehicleId:"",source:"Rental"};const[f,sF]=useState(em);
+const sv=async()=>{if(!f.amount)return;await db.aRv(f);sF(em);sSh(false)};const fl=d.revenue.filter(r=>iR(r.date,tr));const tot=fl.reduce((s,r)=>s+(+r.amount),0);const dk=fl.filter(r=>r.source==="Deposit Kept").reduce((s,r)=>s+(+r.amount),0);
+const vRM={};fl.forEach(r=>{if(r.vehicle_id)vRM[r.vehicle_id]=(vRM[r.vehicle_id]||0)+(+r.amount)});const vE=d.vehicles.map(v=>({...v,rev:vRM[v.id]||0})).sort((a,b)=>b.rev-a.rev);
+return<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h3 style={{margin:0,color:"#e0e0e8",fontSize:20,fontFamily:"'Rajdhani',sans-serif"}}>{t.revenueTracker}</h3><button style={Z.primaryBtn} onClick={()=>{sF(em);sSh(true)}}>{t.addRevenue}</button></div><TF value={tr} onChange={sTR}/>
+<div style={Z.statGrid}><SC label={t.totalRevenue} value={$(tot)} accent="#16a34a"/><SC label={t.fromRentals} value={$(tot-dk)} accent="#0891b2"/><SC label={t.depositsKept} value={$(dk)} accent="#be185d"/><SC label={t.avgPerEntry} value={$(fl.length?tot/fl.length:0)} accent="#E81224"/></div>
+{sh&&<Md title={t.addRevenue} onClose={()=>sSh(false)}><In label={t.description} value={f.description} onChange={e=>sF({...f,description:e.target.value})}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><In label={t.amount+" *"} type="number" value={f.amount} onChange={e=>sF({...f,amount:e.target.value})}/><In label={t.date} type="date" value={f.date} onChange={e=>sF({...f,date:e.target.value})}/></div><In label={t.vehicle} type="select" value={f.vehicleId} onChange={e=>sF({...f,vehicleId:e.target.value})}><option value="">—</option>{d.vehicles.map(v=><option key={v.id} value={v.id}>{v.name}</option>)}</In><button style={Z.primaryBtn} onClick={sv}>{t.create}</button></Md>}
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginTop:20}}><div style={Z.card}><h4 style={Z.cardTitle}>{t.revenuePerVehicle}</h4><Br items={vE.map(v=>({l:v.name,v:v.rev}))} c1="#16a34a" c2="#4ade80"/></div><div style={Z.card}><h4 style={Z.cardTitle}>{t.recentRevenue}</h4>{fl.slice(0,10).map(r=><div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid #1e1e2a",fontSize:12}}><div><div style={{fontWeight:600,color:"#e0e0e8"}}>{r.description||r.source}</div><div style={{fontSize:10,color:"#666"}}>{r.date}{r.vehicle_id&&` · ${d.vehicles.find(v=>v.id===r.vehicle_id)?.name||""}`}</div></div><div style={{display:"flex",gap:4}}><span style={{fontFamily:"'Space Mono',monospace",color:"#16a34a"}}>+{$(r.amount)}</span>{iA&&<button style={{...Z.smallBtn,color:"#dc2626",padding:"1px 4px",fontSize:10}} onClick={()=>db.dRv(r.id)}>✕</button>}</div></div>)}</div></div></div>}
+
+/* CASH */
+function CB({data:d,db,profile:p,timeRange:tr,setTimeRange:sTR}){const t=useT();const[sh,sSh]=useState(false);const[fT,sFT]=useState("deposit");const iA=p?.role==="admin";const em={amount:"",date:td(),description:"",reference:""};const[f,sF]=useState(em);
+const ops=d.cashOps;const cb=ops.reduce((s,o)=>{if(o.type==="in"||o.type==="withdrawal")return s+(+o.amount);if(o.type==="out"||o.type==="deposit")return s-(+o.amount);return s},0);const bd=ops.filter(o=>o.type==="deposit").reduce((s,o)=>s+(+o.amount),0);const bw=ops.filter(o=>o.type==="withdrawal").reduce((s,o)=>s+(+o.amount),0);const bb=bd-bw;
+const sv=async()=>{if(!f.amount)return;await db.aCO({...f,type:fT});sF(em);sSh(false)};const fl=ops.filter(o=>iR(o.date,tr));
+return<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}><h3 style={{margin:0,color:"#e0e0e8",fontSize:20,fontFamily:"'Rajdhani',sans-serif"}}>{t.cashRegisterBank}</h3><div style={{display:"flex",gap:6}}><button style={Z.primaryBtn} onClick={()=>{sFT("deposit");sF(em);sSh(true)}}>{t.bankDeposit}</button><button style={{...Z.primaryBtn,background:"linear-gradient(135deg,#7c3aed,#5b21b6)"}} onClick={()=>{sFT("withdrawal");sF(em);sSh(true)}}>{t.withdrawal}</button></div></div><TF value={tr} onChange={sTR}/>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginTop:16}}><div style={{background:"linear-gradient(135deg,#1a0a0c,#3a1015)",borderRadius:14,padding:22,color:"#fff",border:"1px solid #E8122433"}}><div style={{fontSize:11,textTransform:"uppercase",letterSpacing:1,opacity:.7}}>{t.cashRegisterBalance}</div><div style={{fontSize:28,fontWeight:700,fontFamily:"'Space Mono',monospace",marginTop:6}}>{$(cb)}</div></div><div style={{background:"linear-gradient(135deg,#0a1a10,#0f2a18)",borderRadius:14,padding:22,color:"#fff",border:"1px solid #16a34a33"}}><div style={{fontSize:11,textTransform:"uppercase",letterSpacing:1,opacity:.7}}>{t.bankBalance}</div><div style={{fontSize:28,fontWeight:700,fontFamily:"'Space Mono',monospace",marginTop:6}}>{$(bb)}</div><div style={{fontSize:10,opacity:.7,marginTop:4}}>{t.deposited}: {$(bd)} · {t.withdrawn}: {$(bw)}</div></div></div>
+{sh&&<Md title={fT==="deposit"?t.bankDeposit:t.withdrawal} onClose={()=>sSh(false)}><In label={t.amount+" *"} type="number" value={f.amount} onChange={e=>sF({...f,amount:e.target.value})}/><In label={t.date} type="date" value={f.date} onChange={e=>sF({...f,date:e.target.value})}/><In label="Reference" value={f.reference} onChange={e=>sF({...f,reference:e.target.value})}/><In label={t.notes} value={f.description} onChange={e=>sF({...f,description:e.target.value})}/><button style={Z.primaryBtn} onClick={sv}>{t.confirm}</button></Md>}
+<div style={{...Z.card,marginTop:20}}><h4 style={Z.cardTitle}>{t.transactionLog}</h4><div style={{maxHeight:400,overflow:"auto"}}>{fl.length===0&&<p style={Z.empty}>{t.noData}</p>}{fl.map(o=>{const ps=o.type==="in"||o.type==="withdrawal";const ic=o.type==="in"?"💵":o.type==="out"?"📤":o.type==="deposit"?"🏦":"🔄";return<div key={o.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #1e1e2a"}}><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:16}}>{ic}</span><div><div style={{fontSize:12,fontWeight:600,color:"#e0e0e8"}}>{o.description||o.type}</div><div style={{fontSize:10,color:"#666"}}>{o.date}{o.reference&&` · ${o.reference}`}</div></div></div><div style={{display:"flex",gap:4}}><span style={{fontFamily:"'Space Mono',monospace",fontSize:13,fontWeight:600,color:ps?"#16a34a":o.type==="deposit"?"#7c3aed":"#dc2626"}}>{ps?"+":"−"}{$(o.amount)}</span>{iA&&(o.type==="deposit"||o.type==="withdrawal")&&<button style={{...Z.smallBtn,color:"#dc2626",padding:"1px 4px",fontSize:10}} onClick={()=>db.dCO(o.id)}>✕</button>}</div></div>})}</div></div></div>}
+
+/* LOGIN */
+function LP({lang:ln,changeLang:cL}){const t=useT();const[em,sE]=useState("");const[pw,sP]=useState("");const[ld,sL]=useState(false);const[er,sEr]=useState("");
+const go=async()=>{sL(true);sEr("");const{error}=await supabase.auth.signInWithPassword({email:em,password:pw});if(error)sEr(error.message);sL(false)};
+return<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0e0e14",fontFamily:"'Inter',sans-serif",direction:ln==="ar"?"rtl":"ltr"}}><div style={{width:380,padding:40,background:"#111118",borderRadius:16,border:"1px solid #1e1e2a",boxShadow:"0 20px 60px rgba(0,0,0,.5)"}}>
+<div style={{display:"flex",justifyContent:"center",gap:6,marginBottom:20}}>{LG.map(l=><button key={l.id} onClick={()=>cL(l.id)} style={{padding:"5px 12px",border:ln===l.id?"1px solid #E81224":"1px solid #2a2a3a",background:ln===l.id?"#E8122422":"transparent",color:ln===l.id?"#E81224":"#888",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:600}}>{l.f}</button>)}</div>
+<div style={{textAlign:"center",marginBottom:32}}><svg width="56" height="56" viewBox="0 0 36 36" fill="none"><circle cx="18" cy="18" r="17" fill="#111118" stroke="#E81224" strokeWidth="2"/><path d="M8 22 L14 14 L18 18 L24 10 L28 14" stroke="#E81224" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg><h1 style={{fontSize:28,fontFamily:"'Rajdhani',sans-serif",fontWeight:700,color:"#fff",marginTop:12,letterSpacing:2}}><span style={{color:"#E81224"}}>BB</span> MOTO</h1><div style={{fontSize:11,color:"#666",letterSpacing:3,fontFamily:"'Rajdhani',sans-serif"}}>{t.managementSystem}</div></div>
+<div style={{marginBottom:16}}><label style={{display:"block",fontSize:11,color:"#888",marginBottom:4,fontWeight:600}}>{t.email}</label><input type="email" value={em} onChange={e=>sE(e.target.value)} style={{...Z.input,padding:"12px 14px"}}/></div>
+<div style={{marginBottom:20}}><label style={{display:"block",fontSize:11,color:"#888",marginBottom:4,fontWeight:600}}>{t.password}</label><input type="password" value={pw} onChange={e=>sP(e.target.value)} style={{...Z.input,padding:"12px 14px"}}/></div>
+{er&&<div style={{background:"#2a1010",border:"1px solid #5c2020",borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:13,color:"#f87171"}}>{er}</div>}
+<button onClick={go} disabled={ld} style={{width:"100%",padding:13,background:"linear-gradient(135deg,#E81224,#b30e1c)",color:"#fff",border:"none",borderRadius:8,fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"'Rajdhani',sans-serif",letterSpacing:1,textTransform:"uppercase",opacity:ld?.6:1}}>{ld?t.signingIn:t.signIn}</button>
+<div style={{textAlign:"center",marginTop:20,fontSize:12,color:"#555"}}>{t.authorizedOnly}</div></div></div>}
+
+/* MAIN */
+const TB=[{id:"dashboard",k:"dashboard",i:"📊"},{id:"clients",k:"clients",i:"👥"},{id:"blacklist",k:"blacklist",i:"🚫"},{id:"reservations",k:"reservations",i:"📋"},{id:"contracts",k:"contracts",i:"📝"},{id:"fleet",k:"fleet",i:"🛵"},{id:"revenue",k:"revenue",i:"💰"},{id:"expenses",k:"expenses",i:"💸"},{id:"cash",k:"cashBank",i:"🏦"}];
+
+export default function App(){const[se,sSe]=useState(null);const[pr,sPr]=useState(null);const[aL,sAL]=useState(true);const[tab,sTab]=useState("dashboard");const[tr,sTr]=useState("month");const[so,sSo]=useState(true);const[ln,sLn]=useState(()=>localStorage.getItem("bb-moto-lang")||"fr");const cL=l=>{sLn(l);localStorage.setItem("bb-moto-lang",l)};const tt=T[ln]||T.en;const ir=ln==="ar";const tabs=TB.map(t=>({...t,label:tt[t.k]||t.k}));
+useEffect(()=>{supabase.auth.getSession().then(({data:{session:s}})=>{sSe(s);sAL(false)});const{data:{subscription:sub}}=supabase.auth.onAuthStateChange((_,s)=>sSe(s));return()=>sub.unsubscribe()},[]);
+useEffect(()=>{if(se?.user)supabase.from("profiles").select("*").eq("id",se.user.id).single().then(({data})=>{if(data)sPr(data)});else sPr(null)},[se]);
+const u=se?.user;const db=useDB(u);
+if(aL)return<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0e0e14",color:"#666"}}>{tt.loading}</div>;
+if(!se)return<Lx.Provider value={ln}><LP lang={ln} changeLang={cL}/></Lx.Provider>;
+return<Lx.Provider value={ln}><div style={{...Z.root,direction:ir?"rtl":"ltr"}}>
+<style>{`option{background:#111118;color:#e0e0e8}select option:checked{background:#E81224;color:#fff}input::placeholder,textarea::placeholder{color:#555!important}input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(.7)}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:#0e0e14}::-webkit-scrollbar-thumb{background:#2a2a3a;border-radius:3px}`}</style>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<div style={{...Z.sidebar,width:so?210:54}}>
+<div style={Z.logoArea}><svg width="30" height="30" viewBox="0 0 36 36" fill="none"><circle cx="18" cy="18" r="17" fill="#111118" stroke="#E81224" strokeWidth="2"/><path d="M8 22 L14 14 L18 18 L24 10 L28 14" stroke="#E81224" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>{so&&<div style={{lineHeight:1}}><span style={{fontSize:15,fontWeight:700,color:"#fff",fontFamily:"'Rajdhani',sans-serif",letterSpacing:2}}><span style={{color:"#E81224"}}>BB</span> MOTO</span><br/><span style={{fontSize:8,color:"#888",letterSpacing:3}}>TANGER</span></div>}</div>
+<button onClick={()=>sSo(!so)} style={Z.collapseBtn}>{so?"◀":"▶"}</button>
+<nav style={{marginTop:14,flex:1,overflow:"auto"}}>{tabs.map(tb=><button key={tb.id} onClick={()=>sTab(tb.id)} style={{...Z.navBtn,...(tab===tb.id?Z.navBtnActive:{}),justifyContent:so?"flex-start":"center"}}><span style={{fontSize:15}}>{tb.i}</span>{so&&<span style={{marginLeft:ir?0:7,marginRight:ir?7:0,fontSize:12}}>{tb.label}</span>}</button>)}</nav>
+{so&&<div style={{borderTop:"1px solid #1e1e2a",paddingTop:8}}><div style={{display:"flex",gap:3,marginBottom:6}}>{LG.map(l=><button key={l.id} onClick={()=>cL(l.id)} style={{flex:1,padding:"3px 0",border:ln===l.id?"1px solid #E81224":"1px solid #2a2a3a",background:ln===l.id?"#E8122422":"transparent",color:ln===l.id?"#E81224":"#888",borderRadius:5,cursor:"pointer",fontSize:10,fontWeight:700}}>{l.f}</button>)}</div><div style={{fontSize:10,color:"#888"}}>{pr?.full_name||u?.email}</div><div style={{fontSize:9,color:"#E81224",fontWeight:700,marginBottom:4}}>{pr?.role}</div><button onClick={async()=>await supabase.auth.signOut()} style={{...Z.resetBtn,width:"100%"}}>{tt.signOut}</button></div>}
+</div>
+<div style={Z.main}><div style={Z.topBar}><h2 style={{margin:0,fontSize:17,color:"#f0f0f5",fontFamily:"'Rajdhani',sans-serif",fontWeight:700}}>{tabs.find(t=>t.id===tab)?.i} {tabs.find(t=>t.id===tab)?.label}</h2><div style={{display:"flex",alignItems:"center",gap:10}}>{db.loading&&<span style={{fontSize:10,color:"#E81224"}}>{tt.syncing}</span>}<div style={{fontSize:10,color:"#666",fontFamily:"'Space Mono',monospace"}}>{new Date().toLocaleDateString(ln==="ar"?"ar-MA":ln==="fr"?"fr-MA":"en-MA",{weekday:"short",year:"numeric",month:"short",day:"numeric"})}</div></div></div>
+<div style={Z.content}>
+{tab==="dashboard"&&<Dash data={db.data} timeRange={tr} setTimeRange={sTr}/>}
+{tab==="fleet"&&<Fl data={db.data} db={db} profile={pr}/>}
+{tab==="clients"&&<Cl data={db.data} db={db} profile={pr}/>}
+{tab==="blacklist"&&<BL data={db.data} db={db}/>}
+{tab==="contracts"&&<Ct data={db.data} db={db} profile={pr}/>}
+{tab==="reservations"&&<Rs data={db.data} db={db} profile={pr}/>}
+{tab==="expenses"&&<Ex data={db.data} db={db} profile={pr} timeRange={tr} setTimeRange={sTr}/>}
+{tab==="revenue"&&<Rv data={db.data} db={db} profile={pr} timeRange={tr} setTimeRange={sTr}/>}
+{tab==="cash"&&<CB data={db.data} db={db} profile={pr} timeRange={tr} setTimeRange={sTr}/>}
+</div></div></div></Lx.Provider>}
+
+const Z={root:{display:"flex",height:"100vh",fontFamily:"'Inter',sans-serif",background:"#0e0e14",color:"#e0e0e8",overflow:"hidden"},sidebar:{background:"#111118",display:"flex",flexDirection:"column",padding:"14px 8px",transition:"width .25s",flexShrink:0,overflow:"hidden",borderRight:"1px solid #1e1e2a"},logoArea:{display:"flex",alignItems:"center",gap:8,padding:"0 4px"},collapseBtn:{background:"none",border:"none",color:"#555",cursor:"pointer",fontSize:10,marginTop:6,textAlign:"center"},navBtn:{display:"flex",alignItems:"center",width:"100%",padding:"7px 9px",border:"none",background:"none",color:"#888",fontSize:12,fontFamily:"'Inter',sans-serif",cursor:"pointer",borderRadius:7,marginBottom:1,transition:"all .15s",whiteSpace:"nowrap"},navBtnActive:{background:"linear-gradient(135deg,#E81224,#b30e1c)",color:"#fff",fontWeight:600},resetBtn:{background:"none",border:"1px solid #E8122433",color:"#E81224",padding:"5px",borderRadius:5,cursor:"pointer",fontSize:10},main:{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"},topBar:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 20px",background:"#141420",borderBottom:"1px solid #1e1e2a"},content:{flex:1,overflow:"auto",padding:20},statGrid:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(170px,1fr))",gap:10,marginTop:10},statCard:{background:"#16161f",borderRadius:10,padding:"12px 14px",boxShadow:"0 2px 8px rgba(0,0,0,.3)",border:"1px solid #1e1e2a"},statLabel:{fontSize:10,color:"#777",textTransform:"uppercase",letterSpacing:1,fontFamily:"'Rajdhani',sans-serif",fontWeight:600},statValue:{fontSize:20,fontWeight:700,color:"#f0f0f5",marginTop:2,fontFamily:"'Space Mono',monospace"},card:{background:"#16161f",borderRadius:10,padding:14,boxShadow:"0 2px 8px rgba(0,0,0,.3)",border:"1px solid #1e1e2a"},cardTitle:{margin:"0 0 10px",fontSize:13,fontWeight:700,color:"#e0e0e8",fontFamily:"'Rajdhani',sans-serif"},primaryBtn:{background:"linear-gradient(135deg,#E81224,#b30e1c)",color:"#fff",border:"none",padding:"7px 14px",borderRadius:7,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'Rajdhani',sans-serif",whiteSpace:"nowrap",letterSpacing:.5,textTransform:"uppercase"},smallBtn:{background:"none",border:"1px solid #2a2a3a",padding:"2px 7px",borderRadius:5,fontSize:10,cursor:"pointer",color:"#999"},filterBtn:{background:"#16161f",border:"1px solid #2a2a3a",padding:"4px 10px",borderRadius:18,fontSize:11,cursor:"pointer",color:"#888",transition:"all .15s"},filterBtnActive:{background:"#E81224",color:"#fff",borderColor:"#E81224"},overlay:{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000},modal:{background:"#1a1a24",borderRadius:14,width:"92%",maxHeight:"88vh",overflow:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.5)",border:"1px solid #2a2a3a"},modalHeader:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderBottom:"1px solid #2a2a3a"},modalBody:{padding:16},closeBtn:{background:"none",border:"none",fontSize:15,cursor:"pointer",color:"#666"},input:{width:"100%",padding:"7px 9px",border:"1px solid #2a2a3a",borderRadius:7,fontSize:13,fontFamily:"'Inter',sans-serif",outline:"none",boxSizing:"border-box",background:"#111118",color:"#e0e0e8"},textarea:{width:"100%",padding:"7px 9px",border:"1px solid #2a2a3a",borderRadius:7,fontSize:13,fontFamily:"'Inter',sans-serif",outline:"none",minHeight:50,resize:"vertical",boxSizing:"border-box",background:"#111118",color:"#e0e0e8"},label:{display:"block",fontSize:10,fontWeight:600,color:"#888",marginBottom:3,textTransform:"uppercase",letterSpacing:.5,fontFamily:"'Rajdhani',sans-serif"},badge:{padding:"2px 7px",borderRadius:10,fontSize:10,fontWeight:600,display:"inline-block"},empty:{color:"#555",fontSize:12,fontStyle:"italic"}};
