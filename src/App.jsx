@@ -503,6 +503,69 @@ function SparkLine({ data, width = 200, height = 50, color = "var(--accent)" }) 
   );
 }
 
+// ─── Standalone Form Components (proper hooks usage) ───
+function RevenueForm({ onSave, onCancel }) {
+  const [f, setF] = useState({ amount: "", type: "other", description: "", date: today(), vehicle_id: "" });
+  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  return (
+    <>
+      <div className="form-row">
+        <div className="form-group"><label>Amount (MAD)</label><input type="number" value={f.amount} onChange={(e) => set("amount", e.target.value)} /></div>
+        <div className="form-group"><label>Type</label>
+          <select value={f.type} onChange={(e) => set("type", e.target.value)}>
+            <option value="rental">Rental</option><option value="deposit">Deposit</option><option value="penalty">Penalty</option><option value="other">Other</option>
+          </select>
+        </div>
+      </div>
+      <div className="form-group"><label>Date</label><input type="date" value={f.date} onChange={(e) => set("date", e.target.value)} /></div>
+      <div className="form-group"><label>Description</label><input value={f.description} onChange={(e) => set("description", e.target.value)} /></div>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+        <button className="btn btn-secondary" onClick={onCancel}>Cancel</button>
+        <button className="btn btn-primary" onClick={() => onSave(f)}>Save</button>
+      </div>
+    </>
+  );
+}
+
+function ExpenseForm({ onSave, onCancel }) {
+  const [f, setF] = useState({ amount: "", category: "fuel", description: "", date: today(), vehicle_id: "" });
+  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  return (
+    <>
+      <div className="form-row">
+        <div className="form-group"><label>Amount (MAD)</label><input type="number" value={f.amount} onChange={(e) => set("amount", e.target.value)} /></div>
+        <div className="form-group"><label>Category</label>
+          <select value={f.category} onChange={(e) => set("category", e.target.value)}>
+            <option value="fuel">Fuel</option><option value="maintenance">Maintenance</option><option value="insurance">Insurance</option><option value="rent">Rent</option><option value="salary">Salary</option><option value="other">Other</option>
+          </select>
+        </div>
+      </div>
+      <div className="form-group"><label>Date</label><input type="date" value={f.date} onChange={(e) => set("date", e.target.value)} /></div>
+      <div className="form-group"><label>Description</label><input value={f.description} onChange={(e) => set("description", e.target.value)} /></div>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+        <button className="btn btn-secondary" onClick={onCancel}>Cancel</button>
+        <button className="btn btn-primary" onClick={() => onSave(f)}>Save</button>
+      </div>
+    </>
+  );
+}
+
+function CashForm({ onSave, onCancel }) {
+  const [f, setF] = useState({ amount: "", description: "", date: today() });
+  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  return (
+    <>
+      <div className="form-group"><label>Amount (MAD)</label><input type="number" value={f.amount} onChange={(e) => set("amount", e.target.value)} /></div>
+      <div className="form-group"><label>Date</label><input type="date" value={f.date} onChange={(e) => set("date", e.target.value)} /></div>
+      <div className="form-group"><label>Description</label><input value={f.description} onChange={(e) => set("description", e.target.value)} /></div>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+        <button className="btn btn-secondary" onClick={onCancel}>Cancel</button>
+        <button className="btn btn-primary" onClick={() => onSave(f)}>Save</button>
+      </div>
+    </>
+  );
+}
+
 // ─── LOGIN ───
 function LoginPage({ onLogin }) {
   const [email, setEmail] = useState("");
@@ -567,6 +630,8 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [detailVehicle, setDetailVehicle] = useState(null);
   const [detailClient, setDetailClient] = useState(null);
+  const [contractTab, setContractTab] = useState("active");
+  const [clientTab, setClientTab] = useState("all");
 
   const token = session?.access_token;
 
@@ -580,7 +645,7 @@ export default function App() {
         supabase.query("contracts", { order: "created_at.desc", token }),
         supabase.query("revenue", { order: "created_at.desc", token }),
         supabase.query("expenses", { order: "created_at.desc", token }),
-        supabase.query("cash_operations", { order: "created_at.desc", token }),
+        supabase.query("cash_ops", { order: "created_at.desc", token }),
         supabase.query("clients", { order: "created_at.desc", token }).catch(() => []),
         supabase.query("alerts", { order: "created_at.desc", token }).catch(() => []),
         supabase.query("reservations", { order: "created_at.desc", token }).catch(() => []),
@@ -917,15 +982,14 @@ export default function App() {
   };
 
   const renderContracts = () => {
-    const [tab, setTab] = useState("active");
     const filtered = contracts
-      .filter((c) => tab === "all" || c.status === tab)
+      .filter((c) => contractTab === "all" || c.status === contractTab)
       .filter((c) => `${c.client_name}`.toLowerCase().includes(search.toLowerCase()));
     return (
       <>
         <div className="tabs">
           {["active", "completed", "cancelled", "all"].map((t) => (
-            <button key={t} className={`tab-btn ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t[0].toUpperCase() + t.slice(1)}</button>
+            <button key={t} className={`tab-btn ${contractTab === t ? "active" : ""}`} onClick={() => setContractTab(t)}>{t[0].toUpperCase() + t.slice(1)}</button>
           ))}
         </div>
         <div className="table-wrap">
@@ -1061,16 +1125,15 @@ export default function App() {
 
   const renderClients = () => {
     if (detailClient) return renderClientDetail(detailClient);
-    const [tab, setTab] = useState("all");
     const filtered = clients
-      .filter((c) => tab === "all" || (tab === "blacklisted" ? c.is_blacklisted : !c.is_blacklisted))
+      .filter((c) => clientTab === "all" || (clientTab === "blacklisted" ? c.is_blacklisted : !c.is_blacklisted))
       .filter((c) => `${c.full_name} ${c.phone} ${c.id_number}`.toLowerCase().includes(search.toLowerCase()));
     return (
       <>
         <div className="tabs">
-          <button className={`tab-btn ${tab === "all" ? "active" : ""}`} onClick={() => setTab("all")}>All ({clients.length})</button>
-          <button className={`tab-btn ${tab === "active" ? "active" : ""}`} onClick={() => setTab("active")}>Active ({clients.filter((c) => !c.is_blacklisted).length})</button>
-          <button className={`tab-btn ${tab === "blacklisted" ? "active" : ""}`} onClick={() => setTab("blacklisted")}>Blacklisted ({clients.filter((c) => c.is_blacklisted).length})</button>
+          <button className={`tab-btn ${clientTab === "all" ? "active" : ""}`} onClick={() => setClientTab("all")}>All ({clients.length})</button>
+          <button className={`tab-btn ${clientTab === "active" ? "active" : ""}`} onClick={() => setClientTab("active")}>Active ({clients.filter((c) => !c.is_blacklisted).length})</button>
+          <button className={`tab-btn ${clientTab === "blacklisted" ? "active" : ""}`} onClick={() => setClientTab("blacklisted")}>Blacklisted ({clients.filter((c) => c.is_blacklisted).length})</button>
         </div>
         <div className="table-wrap">
           <div className="table-toolbar">
@@ -1354,73 +1417,17 @@ export default function App() {
       )}
       {modal === "addRevenue" && (
         <Modal title="Add Revenue" onClose={() => setModal(null)}>
-          {(() => {
-            const [f, setF] = useState({ amount: "", type: "other", description: "", date: today(), vehicle_id: "" });
-            const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-            return (
-              <>
-                <div className="form-row">
-                  <div className="form-group"><label>Amount (MAD)</label><input type="number" value={f.amount} onChange={(e) => set("amount", e.target.value)} /></div>
-                  <div className="form-group"><label>Type</label>
-                    <select value={f.type} onChange={(e) => set("type", e.target.value)}>
-                      <option value="rental">Rental</option><option value="deposit">Deposit</option><option value="penalty">Penalty</option><option value="other">Other</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="form-group"><label>Date</label><input type="date" value={f.date} onChange={(e) => set("date", e.target.value)} /></div>
-                <div className="form-group"><label>Description</label><input value={f.description} onChange={(e) => set("description", e.target.value)} /></div>
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                  <button className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
-                  <button className="btn btn-primary" onClick={async () => { await supabase.insert("revenue", { ...f, amount: Number(f.amount) || 0 }, token); setModal(null); fetchAll(); }}>Save</button>
-                </div>
-              </>
-            );
-          })()}
+          <RevenueForm onSave={async (f) => { await supabase.insert("revenue", { ...f, amount: Number(f.amount) || 0 }, token); setModal(null); fetchAll(); }} onCancel={() => setModal(null)} />
         </Modal>
       )}
       {modal === "addExpense" && (
         <Modal title="Add Expense" onClose={() => setModal(null)}>
-          {(() => {
-            const [f, setF] = useState({ amount: "", category: "fuel", description: "", date: today(), vehicle_id: "" });
-            const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-            return (
-              <>
-                <div className="form-row">
-                  <div className="form-group"><label>Amount (MAD)</label><input type="number" value={f.amount} onChange={(e) => set("amount", e.target.value)} /></div>
-                  <div className="form-group"><label>Category</label>
-                    <select value={f.category} onChange={(e) => set("category", e.target.value)}>
-                      <option value="fuel">Fuel</option><option value="maintenance">Maintenance</option><option value="insurance">Insurance</option><option value="rent">Rent</option><option value="salary">Salary</option><option value="other">Other</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="form-group"><label>Date</label><input type="date" value={f.date} onChange={(e) => set("date", e.target.value)} /></div>
-                <div className="form-group"><label>Description</label><input value={f.description} onChange={(e) => set("description", e.target.value)} /></div>
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                  <button className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
-                  <button className="btn btn-primary" onClick={async () => { await supabase.insert("expenses", { ...f, amount: Number(f.amount) || 0 }, token); setModal(null); fetchAll(); }}>Save</button>
-                </div>
-              </>
-            );
-          })()}
+          <ExpenseForm onSave={async (f) => { await supabase.insert("expenses", { ...f, amount: Number(f.amount) || 0 }, token); setModal(null); fetchAll(); }} onCancel={() => setModal(null)} />
         </Modal>
       )}
       {(modal === "cashIn" || modal === "cashOut") && (
         <Modal title={modal === "cashIn" ? "Cash In" : "Cash Out"} onClose={() => setModal(null)}>
-          {(() => {
-            const [f, setF] = useState({ amount: "", description: "", date: today() });
-            const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-            return (
-              <>
-                <div className="form-group"><label>Amount (MAD)</label><input type="number" value={f.amount} onChange={(e) => set("amount", e.target.value)} /></div>
-                <div className="form-group"><label>Date</label><input type="date" value={f.date} onChange={(e) => set("date", e.target.value)} /></div>
-                <div className="form-group"><label>Description</label><input value={f.description} onChange={(e) => set("description", e.target.value)} /></div>
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                  <button className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
-                  <button className="btn btn-primary" onClick={async () => { await supabase.insert("cash_operations", { ...f, amount: Number(f.amount) || 0, type: modal === "cashIn" ? "in" : "out" }, token); setModal(null); fetchAll(); }}>Save</button>
-                </div>
-              </>
-            );
-          })()}
+          <CashForm onSave={async (f) => { await supabase.insert("cash_ops", { ...f, amount: Number(f.amount) || 0, type: modal === "cashIn" ? "in" : "out" }, token); setModal(null); fetchAll(); }} onCancel={() => setModal(null)} />
         </Modal>
       )}
     </>
